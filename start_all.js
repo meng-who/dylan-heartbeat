@@ -1,31 +1,29 @@
 const { spawn } = require("child_process");
 
-function startGateway() {
-  const child = spawn(process.execPath, ["start_with_models_proxy.js"], {
+function startProcess(name, script, exitServiceOnStop) {
+  console.log(`[start_all] starting ${name}: ${script}`);
+
+  const child = spawn(process.execPath, [script], {
     stdio: "inherit",
-    env: process.env
+    env: process.env,
+    cwd: __dirname
   });
 
   child.on("exit", (code, signal) => {
-    console.error("gateway exited", { code, signal });
-    process.exit(code || 1);
+    console.error(`[start_all] ${name} exited`, { code, signal });
+
+    if (exitServiceOnStop) {
+      process.exit(code || 1);
+    }
+
+    setTimeout(() => {
+      startProcess(name, script, exitServiceOnStop);
+    }, 5000);
   });
 }
 
-function startWakeUp() {
-  const child = spawn(process.execPath, ["wake_up.js"], {
-    stdio: "inherit",
-    env: process.env
-  });
-
-  child.on("exit", (code, signal) => {
-    console.error("wake-up exited; restarting in 5 seconds", { code, signal });
-    setTimeout(startWakeUp, 5000);
-  });
-}
-
-startGateway();
-startWakeUp();
+startProcess("gateway", "start_with_models_proxy.js", true);
+startProcess("wake-up", "wake_up.js", false);
 
 process.on("SIGTERM", () => process.exit(0));
 process.on("SIGINT", () => process.exit(0));
