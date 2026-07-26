@@ -170,6 +170,19 @@ function summarizeMessagesForLog(messages = []) {
   return { total: list.length, roles, text_chars: textChars, image_parts: imageParts, file_parts: fileParts };
 }
 
+function readPositiveIntegerEnv(key, fallback) {
+  const value = Number(process.env[key]);
+  if (Number.isFinite(value) && value >= 1) return Math.floor(value);
+  return fallback;
+}
+
+function keepSystemAndRecent(messages = [], maxNonSystem = 60) {
+  const list = Array.isArray(messages) ? messages : [];
+  const system = list.filter(msg => msg?.role === "system").slice(-1);
+  const nonSystem = list.filter(msg => msg?.role !== "system").slice(-maxNonSystem);
+  return [...system, ...nonSystem];
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -237,7 +250,8 @@ function loadTimeline() {
 function saveTimeline(messages) {
   const sp = messages.find(m => m.role === "system");
   const nonSP = messages.filter(m => m.role !== "system");
-  const trimmed = nonSP.slice(-49);
+  const maxTimelineMessages = readPositiveIntegerEnv("MAX_TIMELINE_MESSAGES", 50);
+  const trimmed = nonSP.slice(-maxTimelineMessages);
   const final = sp ? [sp, ...trimmed] : trimmed;
   fs.writeJsonSync(TIMELINE_FILE, final, { spaces: 2 });
 }
@@ -463,6 +477,9 @@ const PREFERRED_ENV_ORDER = [
   "DIARY_DIR",
   "DATA_DIR",
   "REQUEST_BODY_LIMIT_MB",
+  "MAX_FORWARD_MESSAGES",
+  "MAX_TIMELINE_MESSAGES",
+  "MAX_WAKE_MESSAGES",
   "MULTIMODAL_MODE",
   "DAY_WAKE_AFTER_MINUTES",
   "NIGHT_WAKE_AFTER_MINUTES",
@@ -638,7 +655,17 @@ app.post("/v1/chat/completions", async (req, reply) => {
       if (!inserted) llmMessages.push(event);
     }
 
-
+    const maxForwardMessages = readPositiveIntegerEnv("MAX_FORWARD_MESSAGES", 60);
+    const beforeLimitSummary = summarizeMessagesForLog(llmMessages);
+    const limitedMessages = keepSystemAndRecent(llmMessages, maxForwardMessages);
+    llmMessages.length = 0;
+    llmMessages.push(...limitedMessages);
+    console.log(JSON.stringify({
+      event: "llm_forward_limit",
+      configured_max_forward_messages: maxForwardMessages,
+      before: beforeLimitSummary,
+      after: summarizeMessagesForLog(llmMessages)
+    }));
 
     console.log(JSON.stringify({
       event: "llm_forward_summary",
