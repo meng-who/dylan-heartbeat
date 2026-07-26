@@ -3,6 +3,7 @@ require("dotenv").config();
 const Fastify = require("fastify");
 const fs = require("fs-extra");
 const path = require("path");
+const { dataPath, resolveDataPath } = require("./storage");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -21,11 +22,11 @@ app.register(require("@fastify/formbody"));
 
 const PORT = Number(process.env.PORT) || 3000;
 const TARGET_API_URL = process.env.TARGET_API_URL;
-const TIMELINE_FILE = "enhanced_messages.json";
-const TIMESTAMP_DB_FILE = "./message_timestamps.json";
+const TIMELINE_FILE = dataPath("enhanced_messages.json");
+const TIMESTAMP_DB_FILE = dataPath("message_timestamps.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
-const DEFAULT_RESTART_COMMAND = "pm2 restart gateway wake-up --update-env";
+const DEFAULT_RESTART_COMMAND = "self";
 
 function readBooleanEnv(key, fallback = false) {
   const raw = String(process.env[key] ?? "").trim().toLowerCase();
@@ -401,8 +402,8 @@ let wakeUpLastHeartbeat = null;
 // ========================
 // 预设方案
 // ========================
-const PRESETS_FILE = "./presets.json";
-const ENV_FILE = ".env";
+const PRESETS_FILE = dataPath("presets.json");
+const ENV_FILE = dataPath(".env");
 const PREFERRED_ENV_ORDER = [
   "TARGET_API_URL",
   "TARGET_API_KEY",
@@ -419,6 +420,7 @@ const PREFERRED_ENV_ORDER = [
   "NTFY_TAGS",
   "DIARY_ENABLED",
   "DIARY_DIR",
+  "DATA_DIR",
   "REQUEST_BODY_LIMIT_MB",
   "MULTIMODAL_MODE",
   "DAY_WAKE_AFTER_MINUTES",
@@ -779,7 +781,7 @@ function normalizeWeatherUnits(value) {
 
 function diaryDirectoryPath() {
   const configured = readEnvValueOrDefault("DIARY_DIR", "diary");
-  return path.isAbsolute(configured) ? configured : path.join(process.cwd(), configured);
+  return resolveDataPath(configured, "diary");
 }
 
 function readDiaryEntries(limit = 20) {
@@ -1689,8 +1691,16 @@ app.post("/admin/restart", { preHandler: basicAuth }, async (req, reply) => {
 
   // 立即回复，避免重启时连接中断
   reply.send({ success: true, output: `重启指令已发送：${restartCommand}` });
-  
-  // 稍后重启。默认只重启本项目的两个进程；可通过 RESTART_COMMAND 自定义。
+
+  if (restartCommand === "self") {
+    setTimeout(() => {
+      console.log("服务准备退出，由 Render 自动重启");
+      process.exit(0);
+    }, 1000);
+    return;
+  }
+
+  // 稍后重启。可通过 RESTART_COMMAND 自定义；Render 上默认使用 self。
   const { exec } = require("child_process");
   exec(restartCommand, (err, stdout, stderr) => {
     if (err) {
