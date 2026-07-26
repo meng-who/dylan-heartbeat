@@ -48,6 +48,27 @@ function getDatePartsInTimeZone(date = new Date()) {
   };
 }
 
+function dateTimeInConfiguredTimeZone(year, month, day, hour, minute) {
+  let result = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  const targetUtc = Date.UTC(year, month - 1, day, hour, minute);
+
+  for (let i = 0; i < 3; i++) {
+    const parts = getDatePartsInTimeZone(result);
+    const actualUtc = Date.UTC(
+      Number(parts.year),
+      Number(parts.month) - 1,
+      Number(parts.day),
+      Number(parts.hour),
+      Number(parts.minute)
+    );
+    const diff = targetUtc - actualUtc;
+    if (diff === 0) break;
+    result = new Date(result.getTime() + diff);
+  }
+
+  return result;
+}
+
 function getDiaryDateString(date = new Date()) {
   const parts = getDatePartsInTimeZone(date);
   return `${parts.year}-${parts.month}-${parts.day}`;
@@ -345,8 +366,13 @@ function parseTimelineTimestamp(value) {
   const match = text.match(/（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
   if (!match) return null;
   const [, yyyy, , month, day, hour, minute] = match;
-  const normalized = `${yyyy}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} ${String(hour).padStart(2, "0")}:${minute}`;
-  const parsed = new Date(normalized);
+  const parsed = dateTimeInConfiguredTimeZone(
+    Number(yyyy),
+    Number(month),
+    Number(day),
+    Number(hour),
+    Number(minute)
+  );
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
@@ -427,6 +453,14 @@ async function runWakeUp() {
   const diffMinutes = Math.floor((now - lastUserTime) / 1000 / 60);
 
   if (!shouldWake(lastUserTime)) {
+    console.log(JSON.stringify({
+      event: "wake_skip",
+      reason: "not_due",
+      diff_minutes: diffMinutes,
+      wake_after_minutes: getWakeAfterMinutes(now),
+      time_zone: TIME_ZONE,
+      last_user_time: lastUserTime.toISOString()
+    }));
     console.log("\n暂不需要唤醒\n");
     return;
   }
