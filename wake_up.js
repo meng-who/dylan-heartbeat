@@ -2,8 +2,9 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
+const { dataPath, resolveDataPath } = require("./storage");
 
-const TIMELINE_PATH = path.join(__dirname, "enhanced_messages.json");
+const TIMELINE_PATH = dataPath("enhanced_messages.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
@@ -11,9 +12,7 @@ const HEARTBEAT_URL = `${GATEWAY_BASE_URL}/internal/heartbeat`;
 const TIME_ZONE = process.env.TIME_ZONE || "Europe/London";
 const WEATHER_TIMEOUT_MS = 5000;
 const DIARY_DIR_NAME = process.env.DIARY_DIR || "diary";
-const DIARY_DIR_PATH = path.isAbsolute(DIARY_DIR_NAME)
-  ? DIARY_DIR_NAME
-  : path.join(__dirname, DIARY_DIR_NAME);
+const DIARY_DIR_PATH = resolveDataPath(DIARY_DIR_NAME, "diary");
 
 function readNumberEnv(key, fallback, options = {}) {
   const value = Number(process.env[key]);
