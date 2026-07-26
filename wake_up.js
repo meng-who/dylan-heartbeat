@@ -237,6 +237,26 @@ function summarizeWakeMessages(messages = []) {
   return { total: list.length, roles, text_chars: chars };
 }
 
+function getWakeHistoryMessages(messages = []) {
+  const maxWakeMessages = Math.floor(
+    readNumberEnv(
+      "MAX_WAKE_MESSAGES",
+      readNumberEnv("MAX_TIMELINE_MESSAGES", 50, { min: 1 }),
+      { min: 1 }
+    )
+  );
+  const list = Array.isArray(messages) ? messages : [];
+  const system = list.filter(msg => msg?.role === "system").slice(-1);
+  const nonSystem = list.filter(msg => msg?.role !== "system").slice(-maxWakeMessages);
+  console.log(JSON.stringify({
+    event: "wake_history_limit",
+    configured_max_wake_messages: maxWakeMessages,
+    before_total: list.length,
+    after_total: system.length + nonSystem.length
+  }));
+  return [...system, ...nonSystem];
+}
+
 function weatherCodeText(code) {
   const table = {
     0: "晴朗",
@@ -467,7 +487,7 @@ async function runWakeUp() {
 
   const weatherContext = await fetchWeatherContext();
   const wakePrompt = buildWakePrompt(getChinaTimeString(), diffMinutes, weatherContext);
-  const cleanMessages = stripPosition(messages);
+  const cleanMessages = stripPosition(getWakeHistoryMessages(messages));
 
   const historyText = cleanMessages
     .filter(msg => msg.role !== "system")
