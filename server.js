@@ -22,6 +22,7 @@ app.register(require("@fastify/formbody"));
 
 const PORT = Number(process.env.PORT) || 3000;
 const TARGET_API_URL = process.env.TARGET_API_URL;
+const TIME_ZONE = process.env.TIME_ZONE || "Europe/London";
 const TIMELINE_FILE = dataPath("enhanced_messages.json");
 const TIMESTAMP_DB_FILE = dataPath("message_timestamps.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
@@ -187,6 +188,41 @@ function safeJsonForInlineScript(value) {
     .replace(/\u2029/g, "\\u2029");
 }
 
+function getDatePartsInTimeZone(date = new Date()) {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23"
+  });
+  const parts = Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]));
+  return {
+    year: Number(parts.year),
+    month: Number(parts.month),
+    day: Number(parts.day),
+    hour: Number(parts.hour),
+    minute: Number(parts.minute)
+  };
+}
+
+function dateTimeInConfiguredTimeZone(year, month, day, hour, minute) {
+  let result = new Date(Date.UTC(year, month - 1, day, hour, minute));
+  const targetUtc = Date.UTC(year, month - 1, day, hour, minute);
+
+  for (let i = 0; i < 3; i++) {
+    const parts = getDatePartsInTimeZone(result);
+    const actualUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+    const diff = targetUtc - actualUtc;
+    if (diff === 0) break;
+    result = new Date(result.getTime() + diff);
+  }
+
+  return result;
+}
+
 // ========================
 // 读取 timeline
 // ========================
@@ -214,8 +250,13 @@ function parseTimestampLabel(value) {
   const match = text.match(/（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
   if (!match) return null;
   const [, yyyy, , month, day, hour, minute] = match;
-  const normalized = `${yyyy}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")} ${String(hour).padStart(2, "0")}:${minute}`;
-  const parsed = new Date(normalized);
+  const parsed = dateTimeInConfiguredTimeZone(
+    Number(yyyy),
+    Number(month),
+    Number(day),
+    Number(hour),
+    Number(minute)
+  );
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
