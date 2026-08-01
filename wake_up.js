@@ -405,6 +405,8 @@ function getLastUserTime(messages) {
       // 旧的 "YYYY-MM-DD HH:mm" 仍然可用，避免无空格时间导致 wake-up 误判没有用户时间。
       const parsed = parseTimelineTimestamp(content);
       if (parsed) return parsed;
+      const fallback = new Date(msg.received_at || msg.created_at || msg.timestamp || "");
+      if (!Number.isNaN(fallback.getTime())) return fallback;
     }
   }
   return null;
