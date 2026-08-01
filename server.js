@@ -100,8 +100,12 @@ function normalizeContentToText(content) {
   return "[非文本内容]";
 }
 
-function normalizeMessageForTimeline(msg) {
-  return { ...msg, content: normalizeContentToText(msg.content) };
+function normalizeMessageForTimeline(msg, options = {}) {
+  const normalized = { ...msg, content: normalizeContentToText(msg.content) };
+  if (options.receivedAt && !extractTimestamp(normalized.content) && !normalized.received_at) {
+    normalized.received_at = options.receivedAt;
+  }
+  return normalized;
 }
 
 function prepareMessageForLLM(msg) {
@@ -355,7 +359,7 @@ function isSystemRule(msg) {
 // ========================
 // 构建 Timeline
 // ========================
-function buildTimeline(kelivoMessages, tsDB) {
+function buildTimeline(kelivoMessages, tsDB, requestReceivedAt = new Date().toISOString()) {
   const oldTimeline = loadTimeline();
   const newSystemMessages = kelivoMessages
     .filter(msg => msg.role === "system")
@@ -365,7 +369,7 @@ function buildTimeline(kelivoMessages, tsDB) {
 
   const newRealMessages = kelivoMessages
     .filter(isRealMessageForTimeline)
-    .map(normalizeMessageForTimeline);
+    .map(msg => normalizeMessageForTimeline(msg, { receivedAt: requestReceivedAt }));
 
   const oldSpecialEvents = oldTimeline.filter(isSpecialEvent).sort((a, b) => {
     const timeA = extractTimestampWithMemory(a, tsDB);
@@ -620,7 +624,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
     if (tsDBDirty) saveTimestampDB(tsDB);
 
-    const finalTimeline = buildTimeline(kelivoMessages, tsDB);
+    const finalTimeline = buildTimeline(kelivoMessages, tsDB, new Date().toISOString());
     saveTimeline(finalTimeline);
 
     // Kelivo 发图时 content 常是数组。默认原样透传给视觉模型；
