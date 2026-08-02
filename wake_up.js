@@ -237,6 +237,28 @@ function summarizeWakeMessages(messages = []) {
   return { total: list.length, roles, text_chars: chars };
 }
 
+function keepWakeHistoryWithinTextChars(messages = [], maxTextChars = 80000) {
+  const list = Array.isArray(messages) ? messages : [];
+  const limit = Number(maxTextChars);
+  if (!Number.isFinite(limit) || limit < 1) return list;
+
+  const system = list.filter(msg => msg?.role === "system").slice(-1);
+  const nonSystem = list.filter(msg => msg?.role !== "system");
+  const kept = [];
+  let chars = 0;
+
+  for (let i = nonSystem.length - 1; i >= 0; i--) {
+    const msg = nonSystem[i];
+    const msgChars = normalizeContentToText(msg?.content).length;
+    if (kept.length > 0 && chars + msgChars > limit) break;
+    kept.unshift(msg);
+    chars += msgChars;
+    if (chars >= limit) break;
+  }
+
+  return [...system, ...kept];
+}
+
 function getWakeHistoryMessages(messages = []) {
   const maxWakeMessages = Math.floor(
     readNumberEnv(
@@ -248,13 +270,19 @@ function getWakeHistoryMessages(messages = []) {
   const list = Array.isArray(messages) ? messages : [];
   const system = list.filter(msg => msg?.role === "system").slice(-1);
   const nonSystem = list.filter(msg => msg?.role !== "system").slice(-maxWakeMessages);
+  const messageLimited = [...system, ...nonSystem];
+  const maxWakeTextChars = Math.floor(readNumberEnv("MAX_WAKE_TEXT_CHARS", 80000, { min: 1 }));
+  const textLimited = keepWakeHistoryWithinTextChars(messageLimited, maxWakeTextChars);
   console.log(JSON.stringify({
     event: "wake_history_limit",
     configured_max_wake_messages: maxWakeMessages,
+    configured_max_wake_text_chars: maxWakeTextChars,
     before_total: list.length,
-    after_total: system.length + nonSystem.length
+    after_total: textLimited.length,
+    before_chars: summarizeWakeMessages(messageLimited).text_chars,
+    after_chars: summarizeWakeMessages(textLimited).text_chars
   }));
-  return [...system, ...nonSystem];
+  return textLimited;
 }
 
 function weatherCodeText(code) {
