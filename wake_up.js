@@ -178,7 +178,7 @@ async function sendPushNotification({ title, body }) {
 }
 
 function isDayTime(date = new Date()) {
-  const hour = date.getHours();
+  const hour = Number(getDatePartsInTimeZone(date).hour);
   const start = readNumberEnv("WAKE_DAY_START_HOUR", 10, { min: 0, max: 23 });
   const end = readNumberEnv("WAKE_DAY_END_HOUR", 24, { min: 1, max: 24 });
   if (start === end) return true;
@@ -481,6 +481,7 @@ async function runWakeUp() {
       diff_minutes: diffMinutes,
       wake_after_minutes: getWakeAfterMinutes(now),
       time_zone: TIME_ZONE,
+      time_zone_hour: Number(getDatePartsInTimeZone(now).hour),
       last_user_time: lastUserTime.toISOString()
     }));
     console.log("\n暂不需要唤醒\n");
