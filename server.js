@@ -187,6 +187,28 @@ function keepSystemAndRecent(messages = [], maxNonSystem = 60) {
   return [...system, ...nonSystem];
 }
 
+function keepWithinTextChars(messages = [], maxTextChars = 250000) {
+  const list = Array.isArray(messages) ? messages : [];
+  const limit = Number(maxTextChars);
+  if (!Number.isFinite(limit) || limit < 1) return list;
+
+  const system = list.filter(msg => msg?.role === "system").slice(-1);
+  const nonSystem = list.filter(msg => msg?.role !== "system");
+  const kept = [];
+  let chars = 0;
+
+  for (let i = nonSystem.length - 1; i >= 0; i--) {
+    const msg = nonSystem[i];
+    const msgChars = summarizeMessageForLog(msg).text_chars;
+    if (kept.length > 0 && chars + msgChars > limit) break;
+    kept.unshift(msg);
+    chars += msgChars;
+    if (chars >= limit) break;
+  }
+
+  return [...system, ...kept];
+}
+
 function escapeHtml(value) {
   return String(value ?? "")
     .replace(/&/g, "&amp;")
@@ -482,8 +504,10 @@ const PREFERRED_ENV_ORDER = [
   "DATA_DIR",
   "REQUEST_BODY_LIMIT_MB",
   "MAX_FORWARD_MESSAGES",
+  "MAX_FORWARD_TEXT_CHARS",
   "MAX_TIMELINE_MESSAGES",
   "MAX_WAKE_MESSAGES",
+  "MAX_WAKE_TEXT_CHARS",
   "MULTIMODAL_MODE",
   "DAY_WAKE_AFTER_MINUTES",
   "NIGHT_WAKE_AFTER_MINUTES",
@@ -660,13 +684,16 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
 
     const maxForwardMessages = readPositiveIntegerEnv("MAX_FORWARD_MESSAGES", 60);
+    const maxForwardTextChars = readPositiveIntegerEnv("MAX_FORWARD_TEXT_CHARS", 250000);
     const beforeLimitSummary = summarizeMessagesForLog(llmMessages);
-    const limitedMessages = keepSystemAndRecent(llmMessages, maxForwardMessages);
+    const messageLimited = keepSystemAndRecent(llmMessages, maxForwardMessages);
+    const limitedMessages = keepWithinTextChars(messageLimited, maxForwardTextChars);
     llmMessages.length = 0;
     llmMessages.push(...limitedMessages);
     console.log(JSON.stringify({
       event: "llm_forward_limit",
       configured_max_forward_messages: maxForwardMessages,
+      configured_max_forward_text_chars: maxForwardTextChars,
       before: beforeLimitSummary,
       after: summarizeMessagesForLog(llmMessages)
     }));
