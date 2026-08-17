@@ -14,9 +14,13 @@ const {
 
 const TIMELINE_PATH = dataPath("enhanced_messages.json");
 const PORT = Number(process.env.PORT) || 3000;
-const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
-const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
-const HEARTBEAT_URL = `${GATEWAY_BASE_URL}/internal/heartbeat`;
+// Gateway 与 wake-up 由 start_all.js 启动在同一容器；内部写请求直接走 loopback，
+// 避免绕公网反代后因来源 IP、旧 .env 或 key 不一致导致心跳被拒绝。
+const INTERNAL_GATEWAY_BASE_URL = (
+  process.env.INTERNAL_GATEWAY_BASE_URL || `http://127.0.0.1:${PORT}`
+).replace(/\/+$/, "");
+const GATEWAY_URL = `${INTERNAL_GATEWAY_BASE_URL}/internal/wake-event`;
+const HEARTBEAT_URL = `${INTERNAL_GATEWAY_BASE_URL}/internal/heartbeat`;
 const TIME_ZONE = resolveTimeZone();
 const WEATHER_TIMEOUT_MS = 5000;
 const DIARY_DIR_NAME = process.env.DIARY_DIR || "diary";
@@ -733,11 +737,16 @@ async function scheduleNextCheck() {
   try {
     // 发送心跳
     try {
-      await fetch(HEARTBEAT_URL, {
+      const heartbeatResponse = await fetch(HEARTBEAT_URL, {
         method: "POST",
         headers: { "X-Gateway-API-Key": process.env.GATEWAY_API_KEY || "" }
       });
-    } catch {}
+      if (!heartbeatResponse.ok) {
+        throw new Error(`Gateway 返回 HTTP ${heartbeatResponse.status}`);
+      }
+    } catch (error) {
+      console.error("心跳发送失败:", error.message);
+    }
     await runWakeUp();
   } catch (err) {
     console.error("唤醒检查出错:", err);
