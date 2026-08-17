@@ -6,6 +6,7 @@ const { dataPath, resolveDataPath } = require("./storage");
 const { parseChatCompletionResponse } = require("./upstream_response");
 const {
   formatDateTimeInTimeZone,
+  getChineseDayPeriod,
   getDatePartsInTimeZone,
   getHourInTimeZone,
   resolveTimeZone,
@@ -432,29 +433,27 @@ function stripPosition(messages) {
 }
 
 function buildWakePrompt(currentTime, diffMinutes, weatherContext = "") {
+  let prompt;
   // 优先读取独立的提示词文件（推荐方式）
   const promptFile = path.join(__dirname, "wake_prompt.txt");
   if (fs.existsSync(promptFile)) {
     const template = fs.readFileSync(promptFile, "utf-8");
-    return template
+    prompt = template
       .replace(/\$\{currentTime\}/g, currentTime)
       .replace(/\$\{diffMinutes\}/g, diffMinutes)
       .replace(/\$\{weatherContext\}/g, weatherContext)
       .replace(/\$\{weather\}/g, weatherContext);
-  }
-
-  // 如果文件不存在，尝试从环境变量读取（兼容旧配置）
-  if (process.env.WAKE_PROMPT_TEMPLATE) {
-    return process.env.WAKE_PROMPT_TEMPLATE
+  } else if (process.env.WAKE_PROMPT_TEMPLATE) {
+    // 如果文件不存在，尝试从环境变量读取（兼容旧配置）
+    prompt = process.env.WAKE_PROMPT_TEMPLATE
       .replace(/\\n/g, '\n')
       .replace(/\$\{currentTime\}/g, currentTime)
       .replace(/\$\{diffMinutes\}/g, diffMinutes)
       .replace(/\$\{weatherContext\}/g, weatherContext)
       .replace(/\$\{weather\}/g, weatherContext);
-  }
-
-  // 默认理智版本（开源通用），可自行修改提示词
-  return `
+  } else {
+    // 默认理智版本（开源通用），可自行修改提示词
+    prompt = `
 ## 最高优先级规则
 1. 这是一次后台自动唤醒，不是用户发起的对话。你没有收到任何新消息。
 2. 你的唯一任务是决定是否主动联系用户。不能生成对话回复。
@@ -470,6 +469,24 @@ ${weatherContext ? `\n${weatherContext}\n` : ""}
 - 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（10字以内）。
 - 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
 `;
+  }
+
+  const now = new Date();
+  const dayPeriod = getChineseDayPeriod(now, TIME_ZONE);
+  const dayOrNight = isDayTime(now) ? "白天" : "夜间";
+  const absenceRule = diffMinutes < 24 * 60
+    ? "不足 24 小时，禁止说‘好久不见’、‘好久没来找我’或任何暗示很久未联系的话。"
+    : "可以准确描述间隔，但不要夸大用户离开的时间。";
+
+  // 无论使用文件、环境变量还是默认提示，都在最后追加不可被旧模板遗漏的实时事实。
+  return `${prompt.trim()}\n\n## 运行时事实（必须遵守）
+- 用户时区：${TIME_ZONE}
+- 用户当地时间：${currentTime}
+- 当前时段：${dayOrNight}，${dayPeriod}
+- 距离用户最后一条消息：${diffMinutes} 分钟
+- ${absenceRule}
+- 问候必须符合上面的当地时段；不要根据模型自身时区、旧聊天内容或猜测改写当前时段。
+- 最近聊天记录由 Gateway 共享给本次唤醒；不要因为换了模型就声称用户没有来找你。`;
 }
 
 async function runWakeUp() {
@@ -533,7 +550,8 @@ async function runWakeUp() {
   const wakeMessages = [
     {
       role: "system",
-      content: [wakePrompt, cleanSP].filter(Boolean).join("\n\n")
+      // 人设在前，实时唤醒规则在最后，避免旧人设里的时间描述盖过当前事实。
+      content: [cleanSP, wakePrompt].filter(Boolean).join("\n\n")
     },
     {
       // 批注 2026-07-15：Claude/部分 New API 适配器会把 system 抽成独立字段；
@@ -582,6 +600,15 @@ ${historyText}`
   const backupModel = String(process.env.BACKUP_MODEL_NAME || "").trim();
   let response;
   let usedBackup = false;
+  let usedModel = primaryModel;
+  console.log(JSON.stringify({
+    event: "wake_model_request",
+    primary_model: primaryModel,
+    backup_model_configured: Boolean(backupModel && backupModel !== primaryModel),
+    time_zone: TIME_ZONE,
+    local_time: getLocalTimeString(),
+    local_period: getChineseDayPeriod(new Date(), TIME_ZONE)
+  }));
   try {
     response = await requestWakeModel(primaryModel);
   } catch (error) {
@@ -595,6 +622,7 @@ ${historyText}`
     }));
     response = await requestWakeModel(backupModel);
     usedBackup = true;
+    usedModel = backupModel;
   }
   let responseText = await response.text();
 
@@ -615,7 +643,15 @@ ${historyText}`
     response = await requestWakeModel(backupModel);
     responseText = await response.text();
     usedBackup = true;
+    usedModel = backupModel;
   }
+
+  console.log(JSON.stringify({
+    event: "wake_model_result",
+    model: usedModel,
+    used_backup: usedBackup,
+    status: response.status
+  }));
 
   let data;
   try {

@@ -42,6 +42,15 @@ function getHourInTimeZone(date = new Date(), timeZone = resolveTimeZone()) {
   return Number(getDatePartsInTimeZone(date, timeZone).hour);
 }
 
+function getChineseDayPeriod(date = new Date(), timeZone = resolveTimeZone()) {
+  const hour = getHourInTimeZone(date, timeZone);
+  if (hour < 5) return "凌晨";
+  if (hour < 11) return "上午";
+  if (hour < 13) return "中午";
+  if (hour < 18) return "下午";
+  return "晚上";
+}
+
 function getTimeZoneOffsetMs(date, timeZone) {
   const parts = getDatePartsInTimeZone(date, timeZone);
   const asUTC = Date.UTC(
@@ -74,6 +83,7 @@ function zonedWallTimeToDate({ year, month, day, hour, minute }, timeZone = reso
 module.exports = {
   DEFAULT_TIME_ZONE,
   formatDateTimeInTimeZone,
+  getChineseDayPeriod,
   getDatePartsInTimeZone,
   getHourInTimeZone,
   resolveTimeZone,
