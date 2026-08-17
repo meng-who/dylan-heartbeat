@@ -180,6 +180,26 @@ function readPositiveIntegerEnv(key, fallback) {
   return fallback;
 }
 
+function shouldRetryWithBackupModel(status, responseText = "") {
+  if ([408, 425, 429].includes(status) || status >= 500) return true;
+  if (![400, 404].includes(status)) return false;
+
+  const text = String(responseText).toLowerCase();
+  const mentionsModel = text.includes("model") || text.includes("模型");
+  const unavailable = [
+    "not found",
+    "not available",
+    "unavailable",
+    "does not exist",
+    "unsupported",
+    "无可用",
+    "不可用",
+    "不存在",
+    "不支持"
+  ].some(marker => text.includes(marker));
+  return mentionsModel && unavailable;
+}
+
 function keepSystemAndRecent(messages = [], maxNonSystem = 60) {
   const list = Array.isArray(messages) ? messages : [];
   const system = list.filter(msg => msg?.role === "system").slice(-1);
@@ -478,6 +498,40 @@ function stripPosition(messages) {
   return messages.map(({ position, ...rest }) => rest);
 }
 
+function addAutomationEventContext(messages, events) {
+  if (!readBooleanEnv("INJECT_WAKE_EVENTS", true) || events.length === 0) return messages;
+
+  const maxEvents = readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10);
+  const recentEvents = events.slice(-maxEvents);
+  const eventLog = recentEvents
+    .map((event, index) => `${index + 1}. ${normalizeContentToText(event.content).trim()}`)
+    .join("\n");
+  const note = [
+    "[Dylan 自动化内部记录]",
+    "以下内容由自动唤醒程序生成，不是用户发送或展示给你的消息。",
+    "它只用于帮助你记住自己此前是否尝试推送、以及推送了什么；不要把它归因于用户。",
+    eventLog,
+    "[/Dylan 自动化内部记录]"
+  ].join("\n");
+
+  let systemIndex = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === "system") {
+      systemIndex = i;
+      break;
+    }
+  }
+  if (systemIndex >= 0) {
+    messages[systemIndex] = {
+      ...messages[systemIndex],
+      content: `${normalizeContentToText(messages[systemIndex].content)}\n\n${note}`
+    };
+  } else {
+    messages.unshift({ role: "system", content: note });
+  }
+  return messages;
+}
+
 let wakeUpLastHeartbeat = null;
 
 // ========================
@@ -490,6 +544,7 @@ const PREFERRED_ENV_ORDER = [
   "TARGET_API_KEY",
   "GATEWAY_API_KEY",
   "MODEL_NAME",
+  "BACKUP_MODEL_NAME",
   "BARK_KEY",
   "CUSTOM_ICON_URL",
   "ALLOW_PUBLIC_API",
@@ -628,7 +683,13 @@ app.post("/v1/chat/completions", async (req, reply) => {
       event: "kelivo_request",
       model: body?.model || "",
       stream: body?.stream === true,
-      messages: summarizeMessagesForLog(body?.messages || [])
+      messages: summarizeMessagesForLog(body?.messages || []),
+      capabilities: {
+        tools: Array.isArray(body?.tools) ? body.tools.length : 0,
+        tool_choice: body?.tool_choice == null ? false : true,
+        web_search_options: body?.web_search_options == null ? false : true,
+        multimodal_mode: shouldForwardMultimodalContent() ? "passthrough" : "text"
+      }
     }));
 
     const kelivoMessages = body.messages || [];
@@ -666,22 +727,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       })
     );
 
-    console.log("本次注入的特殊事件数量:", oldEvents.length);
-
-    for (const event of oldEvents) {
-      const eventTime = extractTimestampWithMemory(event, tsDB);
-      if (!eventTime) { llmMessages.push(event); continue; }
-      let inserted = false;
-      for (let i = 0; i < llmMessages.length; i++) {
-        const msgTime = extractTimestampWithMemory(llmMessages[i], tsDB);
-        if (msgTime && msgTime >= eventTime) {
-          llmMessages.splice(i, 0, event);
-          inserted = true;
-          break;
-        }
-      }
-      if (!inserted) llmMessages.push(event);
-    }
+    console.log("本次注入的特殊事件数量:", readBooleanEnv("INJECT_WAKE_EVENTS", true) ? Math.min(oldEvents.length, readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10)) : 0);
+    addAutomationEventContext(llmMessages, oldEvents);
 
     const maxForwardMessages = readPositiveIntegerEnv("MAX_FORWARD_MESSAGES", 60);
     const maxForwardTextChars = readPositiveIntegerEnv("MAX_FORWARD_TEXT_CHARS", 250000);
@@ -775,8 +822,9 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     const requestedStream = body?.stream === true;
 
-    // 请求模型
-    const response = await fetch(TARGET_API_URL, {
+    const primaryModel = String(body?.model || "").trim();
+    const backupModel = String(process.env.BACKUP_MODEL_NAME || "").trim();
+    let response = await fetch(TARGET_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -784,6 +832,38 @@ app.post("/v1/chat/completions", async (req, reply) => {
       },
       body: JSON.stringify({ ...body, messages: llmMessages })
     });
+
+    if (!response.ok) {
+      const primaryErrorText = await response.text();
+      const shouldFallback =
+        backupModel &&
+        backupModel !== primaryModel &&
+        primaryModel === configuredModelName() &&
+        shouldRetryWithBackupModel(response.status, primaryErrorText);
+
+      if (shouldFallback) {
+        console.log(JSON.stringify({
+          event: "model_fallback",
+          source: "gateway",
+          from: primaryModel,
+          to: backupModel,
+          primary_status: response.status
+        }));
+        response = await fetch(TARGET_API_URL, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${process.env.TARGET_API_KEY}`
+          },
+          body: JSON.stringify({ ...body, model: backupModel, messages: llmMessages })
+        });
+      } else {
+        return reply
+          .code(response.status)
+          .header("Content-Type", response.headers.get("content-type") || "application/json")
+          .send(primaryErrorText);
+      }
+    }
 
     const upstreamContentType = response.headers.get("content-type") || "";
     const shouldStreamResponse = requestedStream || upstreamContentType.includes("text/event-stream");

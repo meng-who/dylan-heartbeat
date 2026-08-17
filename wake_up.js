@@ -226,6 +226,26 @@ function normalizeContentToText(content) {
   return "[非文本内容]";
 }
 
+function shouldRetryWithBackupModel(status, responseText = "") {
+  if ([408, 425, 429].includes(status) || status >= 500) return true;
+  if (![400, 404].includes(status)) return false;
+
+  const text = String(responseText).toLowerCase();
+  const mentionsModel = text.includes("model") || text.includes("模型");
+  const unavailable = [
+    "not found",
+    "not available",
+    "unavailable",
+    "does not exist",
+    "unsupported",
+    "无可用",
+    "不可用",
+    "不存在",
+    "不支持"
+  ].some(marker => text.includes(marker));
+  return mentionsModel && unavailable;
+}
+
 function summarizeWakeMessages(messages = []) {
   const list = Array.isArray(messages) ? messages : [];
   const roles = {};
@@ -575,14 +595,14 @@ ${historyText}`
     return;
   }
 
-  const response = await fetch(process.env.TARGET_API_URL, {
+  const requestWakeModel = model => fetch(process.env.TARGET_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${process.env.TARGET_API_KEY}`
     },
     body: JSON.stringify({
-      model: process.env.MODEL_NAME,
+      model,
       messages: wakeMessages,
       temperature: 0.8,
       top_p: 0.95,
@@ -590,7 +610,28 @@ ${historyText}`
     })
   });
 
-  const responseText = await response.text();
+  const primaryModel = String(process.env.MODEL_NAME || "").trim();
+  const backupModel = String(process.env.BACKUP_MODEL_NAME || "").trim();
+  let response = await requestWakeModel(primaryModel);
+  let responseText = await response.text();
+
+  if (
+    !response.ok &&
+    backupModel &&
+    backupModel !== primaryModel &&
+    shouldRetryWithBackupModel(response.status, responseText)
+  ) {
+    console.log(JSON.stringify({
+      event: "model_fallback",
+      source: "wake_up",
+      from: primaryModel,
+      to: backupModel,
+      primary_status: response.status
+    }));
+    response = await requestWakeModel(backupModel);
+    responseText = await response.text();
+  }
+
   let data;
   try {
     data = JSON.parse(responseText);
