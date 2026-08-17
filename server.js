@@ -4,6 +4,8 @@ const Fastify = require("fastify");
 const fs = require("fs-extra");
 const path = require("path");
 const { dataPath, resolveDataPath } = require("./storage");
+const { decideRequestAccess } = require("./network_access");
+const { resolveTimeZone, zonedWallTimeToDate } = require("./time_utils");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -22,7 +24,13 @@ app.register(require("@fastify/formbody"));
 
 const PORT = Number(process.env.PORT) || 3000;
 const TARGET_API_URL = process.env.TARGET_API_URL;
-const TIME_ZONE = process.env.TIME_ZONE || "Europe/London";
+const TIME_ZONE = resolveTimeZone();
+const IS_CLOUD_RUNTIME = Boolean(
+  process.env.RENDER ||
+  process.env.RENDER_SERVICE_ID ||
+  process.env.RAILWAY_ENVIRONMENT ||
+  process.env.RAILWAY_PROJECT_ID
+);
 const TIMELINE_FILE = dataPath("enhanced_messages.json");
 const TIMESTAMP_DB_FILE = dataPath("message_timestamps.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
@@ -247,41 +255,6 @@ function safeJsonForInlineScript(value) {
     .replace(/\u2029/g, "\\u2029");
 }
 
-function getDatePartsInTimeZone(date = new Date()) {
-  const formatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23"
-  });
-  const parts = Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]));
-  return {
-    year: Number(parts.year),
-    month: Number(parts.month),
-    day: Number(parts.day),
-    hour: Number(parts.hour),
-    minute: Number(parts.minute)
-  };
-}
-
-function dateTimeInConfiguredTimeZone(year, month, day, hour, minute) {
-  let result = new Date(Date.UTC(year, month - 1, day, hour, minute));
-  const targetUtc = Date.UTC(year, month - 1, day, hour, minute);
-
-  for (let i = 0; i < 3; i++) {
-    const parts = getDatePartsInTimeZone(result);
-    const actualUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
-    const diff = targetUtc - actualUtc;
-    if (diff === 0) break;
-    result = new Date(result.getTime() + diff);
-  }
-
-  return result;
-}
-
 // ========================
 // 读取 timeline
 // ========================
@@ -310,13 +283,7 @@ function parseTimestampLabel(value) {
   const match = text.match(/（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
   if (!match) return null;
   const [, yyyy, , month, day, hour, minute] = match;
-  const parsed = dateTimeInConfiguredTimeZone(
-    Number(yyyy),
-    Number(month),
-    Number(day),
-    Number(hour),
-    Number(minute)
-  );
+  const parsed = zonedWallTimeToDate({ year: yyyy, month, day, hour, minute }, TIME_ZONE);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
@@ -557,6 +524,8 @@ const PREFERRED_ENV_ORDER = [
   "DIARY_ENABLED",
   "DIARY_DIR",
   "DATA_DIR",
+  "PUSH_TIMEOUT_MS",
+  "WAKE_UPSTREAM_TIMEOUT_MS",
   "REQUEST_BODY_LIMIT_MB",
   "MAX_FORWARD_MESSAGES",
   "MAX_FORWARD_TEXT_CHARS",
@@ -639,26 +608,26 @@ function readRestartCommand() {
 // 安全：放行 /admin，其他仅本地/局域网
 // ========================
 app.addHook("onRequest", (req, reply, done) => {
-  if (req.url.startsWith("/admin")) return done();
-  // 批注 2026-07-15：公网部署常经过反代，真实公网请求可能在 Node 侧显示为 127/10 网段；
-  // 所以 ALLOW_PUBLIC_API=true 后必须先验 /v1 的网关 key，避免被云平台内网 IP 绕过。
-  if (readBooleanEnv("ALLOW_PUBLIC_API", false) && req.url.startsWith("/v1/")) {
-    const configuredKey = readEnvValue("GATEWAY_API_KEY");
-    if (!configuredKey) {
-      reply.code(401).send({ error: "公网 /v1 已开启，但 GATEWAY_API_KEY 未配置" });
-      return;
-    }
-    const auth = String(req.headers.authorization || "");
-    const bearer = auth.match(/^Bearer\s+(.+)$/i)?.[1]?.trim() || "";
-    const headerKey = String(req.headers["x-gateway-api-key"] || req.headers["x-api-key"] || "").trim();
-    if (bearer === configuredKey || headerKey === configuredKey) return done();
-    reply.code(401).send({ error: "Gateway API Key 无效或缺失" });
-    return;
+  const requestPath = req.url.split("?")[0];
+  const headerKey = String(req.headers["x-gateway-api-key"] || req.headers["x-api-key"] || "").trim();
+  const access = decideRequestAccess({
+    path: requestPath,
+    ip: String(req.ip || req.connection.remoteAddress || ""),
+    isCloudRuntime: IS_CLOUD_RUNTIME,
+    allowPublicApi: readBooleanEnv("ALLOW_PUBLIC_API", false),
+    configuredKey: readEnvValue("GATEWAY_API_KEY"),
+    authorization: req.headers.authorization,
+    headerKey
+  });
+  if (access.allow) return done();
+  if (access.authRejected) {
+    console.warn(JSON.stringify({
+      event: "gateway_auth_rejected",
+      path: requestPath,
+      auth_source: access.authSource || "missing"
+    }));
   }
-  const ip = req.ip || req.connection.remoteAddress;
-  const isTrustedNetwork = ip === "127.0.0.1" || ip === "::1" || ip === "localhost" || /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.)/.test(ip);
-  if (isTrustedNetwork) return done();
-  reply.code(403).send("Forbidden");
+  reply.code(access.status || 403).send({ error: access.error || "Forbidden" });
 });
 
 // ========================
@@ -1893,7 +1862,7 @@ app.post("/admin/restart", { preHandler: basicAuth }, async (req, reply) => {
 // ========================
 // 测试 Bark
 // ========================
-app.get("/test-bark", async (req, reply) => {
+app.get("/test-bark", { preHandler: basicAuth }, async (req, reply) => {
   const now = new Date();
   const pad = n => String(n).padStart(2, '0');
   const formattedTime = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;

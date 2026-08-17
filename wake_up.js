@@ -3,16 +3,31 @@ const fs = require("fs");
 const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 const { dataPath, resolveDataPath } = require("./storage");
+const { parseChatCompletionResponse } = require("./upstream_response");
+const {
+  formatDateTimeInTimeZone,
+  getDatePartsInTimeZone,
+  getHourInTimeZone,
+  resolveTimeZone,
+  zonedWallTimeToDate
+} = require("./time_utils");
 
 const TIMELINE_PATH = dataPath("enhanced_messages.json");
 const PORT = Number(process.env.PORT) || 3000;
 const GATEWAY_BASE_URL = (process.env.GATEWAY_BASE_URL || `http://localhost:${PORT}`).replace(/\/+$/, "");
 const GATEWAY_URL = `${GATEWAY_BASE_URL}/internal/wake-event`;
 const HEARTBEAT_URL = `${GATEWAY_BASE_URL}/internal/heartbeat`;
-const TIME_ZONE = process.env.TIME_ZONE || "Europe/London";
+const TIME_ZONE = resolveTimeZone();
 const WEATHER_TIMEOUT_MS = 5000;
 const DIARY_DIR_NAME = process.env.DIARY_DIR || "diary";
 const DIARY_DIR_PATH = resolveDataPath(DIARY_DIR_NAME, "diary");
+const PUSH_TIMEOUT_MS = readPositiveTimeout("PUSH_TIMEOUT_MS", 15_000);
+const WAKE_UPSTREAM_TIMEOUT_MS = readPositiveTimeout("WAKE_UPSTREAM_TIMEOUT_MS", 300_000);
+
+function readPositiveTimeout(key, fallback) {
+  const value = Number(process.env[key]);
+  return Number.isFinite(value) && value >= 1000 ? Math.floor(value) : fallback;
+}
 
 function readNumberEnv(key, fallback, options = {}) {
   const value = Number(process.env[key]);
@@ -28,54 +43,13 @@ function readBooleanEnv(key, fallback = false) {
   return ["1", "true", "yes", "on"].includes(raw);
 }
 
-function getDatePartsInTimeZone(date = new Date()) {
-  const formatter = new Intl.DateTimeFormat("en-GB", {
-    timeZone: TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23"
-  });
-  const parts = Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]));
-  return {
-    year: parts.year,
-    month: parts.month,
-    day: parts.day,
-    hour: parts.hour,
-    minute: parts.minute
-  };
-}
-
-function dateTimeInConfiguredTimeZone(year, month, day, hour, minute) {
-  let result = new Date(Date.UTC(year, month - 1, day, hour, minute));
-  const targetUtc = Date.UTC(year, month - 1, day, hour, minute);
-
-  for (let i = 0; i < 3; i++) {
-    const parts = getDatePartsInTimeZone(result);
-    const actualUtc = Date.UTC(
-      Number(parts.year),
-      Number(parts.month) - 1,
-      Number(parts.day),
-      Number(parts.hour),
-      Number(parts.minute)
-    );
-    const diff = targetUtc - actualUtc;
-    if (diff === 0) break;
-    result = new Date(result.getTime() + diff);
-  }
-
-  return result;
-}
-
 function getDiaryDateString(date = new Date()) {
-  const parts = getDatePartsInTimeZone(date);
+  const parts = getDatePartsInTimeZone(date, TIME_ZONE);
   return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function getDiaryTimeString(date = new Date()) {
-  const parts = getDatePartsInTimeZone(date);
+  const parts = getDatePartsInTimeZone(date, TIME_ZONE);
   return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
 }
 
@@ -133,6 +107,7 @@ async function sendPushNotification({ title, body }) {
 
     const response = await fetch(server, {
       method: "POST",
+      signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
       headers,
       body: JSON.stringify(payload)
     });
@@ -160,6 +135,7 @@ async function sendPushNotification({ title, body }) {
 
   const response = await fetch("https://api.day.app/push", {
     method: "POST",
+    signal: AbortSignal.timeout(PUSH_TIMEOUT_MS),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(barkPayload)
   });
@@ -178,7 +154,7 @@ async function sendPushNotification({ title, body }) {
 }
 
 function isDayTime(date = new Date()) {
-  const hour = Number(getDatePartsInTimeZone(date).hour);
+  const hour = getHourInTimeZone(date, TIME_ZONE);
   const start = readNumberEnv("WAKE_DAY_START_HOUR", 10, { min: 0, max: 23 });
   const end = readNumberEnv("WAKE_DAY_END_HOUR", 24, { min: 1, max: 24 });
   if (start === end) return true;
@@ -413,14 +389,7 @@ function getChinaTimeString() {
 }
 
 function getLocalTimeString() {
-  const now = new Date();
-  const pad = n => String(n).padStart(2, '0');
-  const yyyy = now.getFullYear();
-  const mm = pad(now.getMonth() + 1);
-  const dd = pad(now.getDate());
-  const hh = pad(now.getHours());
-  const min = pad(now.getMinutes());
-  return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
+  return formatDateTimeInTimeZone(new Date(), TIME_ZONE);
 }
 
 function shouldWake(lastUserTime) {
@@ -434,13 +403,7 @@ function parseTimelineTimestamp(value) {
   const match = text.match(/（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
   if (!match) return null;
   const [, yyyy, , month, day, hour, minute] = match;
-  const parsed = dateTimeInConfiguredTimeZone(
-    Number(yyyy),
-    Number(month),
-    Number(day),
-    Number(hour),
-    Number(minute)
-  );
+  const parsed = zonedWallTimeToDate({ year: yyyy, month, day, hour, minute }, TIME_ZONE);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
@@ -529,7 +492,7 @@ async function runWakeUp() {
       diff_minutes: diffMinutes,
       wake_after_minutes: getWakeAfterMinutes(now),
       time_zone: TIME_ZONE,
-      time_zone_hour: Number(getDatePartsInTimeZone(now).hour),
+      time_zone_hour: getHourInTimeZone(now, TIME_ZONE),
       last_user_time: lastUserTime.toISOString()
     }));
     console.log("\n暂不需要唤醒\n");
@@ -597,6 +560,7 @@ ${historyText}`
 
   const requestWakeModel = model => fetch(process.env.TARGET_API_URL, {
     method: "POST",
+    signal: AbortSignal.timeout(WAKE_UPSTREAM_TIMEOUT_MS),
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${process.env.TARGET_API_KEY}`
@@ -612,11 +576,27 @@ ${historyText}`
 
   const primaryModel = String(process.env.MODEL_NAME || "").trim();
   const backupModel = String(process.env.BACKUP_MODEL_NAME || "").trim();
-  let response = await requestWakeModel(primaryModel);
+  let response;
+  let usedBackup = false;
+  try {
+    response = await requestWakeModel(primaryModel);
+  } catch (error) {
+    if (!backupModel || backupModel === primaryModel) throw error;
+    console.log(JSON.stringify({
+      event: "model_fallback",
+      source: "wake_up",
+      from: primaryModel,
+      to: backupModel,
+      primary_status: error?.name === "TimeoutError" ? "timeout" : "network_error"
+    }));
+    response = await requestWakeModel(backupModel);
+    usedBackup = true;
+  }
   let responseText = await response.text();
 
   if (
     !response.ok &&
+    !usedBackup &&
     backupModel &&
     backupModel !== primaryModel &&
     shouldRetryWithBackupModel(response.status, responseText)
@@ -630,13 +610,14 @@ ${historyText}`
     }));
     response = await requestWakeModel(backupModel);
     responseText = await response.text();
+    usedBackup = true;
   }
 
   let data;
   try {
-    data = JSON.parse(responseText);
-  } catch {
-    throw new Error(`模型返回的不是 JSON（HTTP ${response.status}）：${responseText.slice(0, 300)}`);
+    data = parseChatCompletionResponse(responseText, response.headers.get("content-type") || "");
+  } catch (error) {
+    throw new Error(`模型响应无法解析（HTTP ${response.status}）：${error.message || responseText.slice(0, 300)}`);
   }
   if (!response.ok) {
     throw new Error(`模型请求失败（HTTP ${response.status}）：${responseText.slice(0, 300)}`);
@@ -727,7 +708,10 @@ ${historyText}`
   try {
     const eventResponse = await fetch(GATEWAY_URL, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Gateway-API-Key": process.env.GATEWAY_API_KEY || ""
+      },
       body: JSON.stringify({ content: eventContent })
     });
     if (!eventResponse.ok) {
@@ -749,7 +733,10 @@ async function scheduleNextCheck() {
   try {
     // 发送心跳
     try {
-      await fetch(HEARTBEAT_URL, { method: "POST" });
+      await fetch(HEARTBEAT_URL, {
+        method: "POST",
+        headers: { "X-Gateway-API-Key": process.env.GATEWAY_API_KEY || "" }
+      });
     } catch {}
     await runWakeUp();
   } catch (err) {
