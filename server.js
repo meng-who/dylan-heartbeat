@@ -5,7 +5,7 @@ const fs = require("fs-extra");
 const path = require("path");
 const { dataPath, resolveDataPath } = require("./storage");
 const { decideRequestAccess } = require("./network_access");
-const { resolveTimeZone, zonedWallTimeToDate } = require("./time_utils");
+const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -279,12 +279,7 @@ function saveTimeline(messages) {
 // 提取时间戳（支持多种格式）
 // ========================
 function parseTimestampLabel(value) {
-  const text = String(value || "");
-  const match = text.match(/（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
-  if (!match) return null;
-  const [, yyyy, , month, day, hour, minute] = match;
-  const parsed = zonedWallTimeToDate({ year: yyyy, month, day, hour, minute }, TIME_ZONE);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return parseLeadingZonedTimestamp(value, TIME_ZONE);
 }
 
 function stripLeadingTimestamp(content) {

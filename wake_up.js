@@ -4,13 +4,14 @@ const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 const { dataPath, resolveDataPath } = require("./storage");
 const { parseChatCompletionResponse } = require("./upstream_response");
+const { findWakeOutputViolations } = require("./wake_guardrails");
 const {
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
   getDatePartsInTimeZone,
   getHourInTimeZone,
+  parseLeadingZonedTimestamp,
   resolveTimeZone,
-  zonedWallTimeToDate
 } = require("./time_utils");
 
 const TIMELINE_PATH = dataPath("enhanced_messages.json");
@@ -404,12 +405,7 @@ function shouldWake(lastUserTime) {
 }
 
 function parseTimelineTimestamp(value) {
-  const text = String(value || "");
-  const match = text.match(/（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
-  if (!match) return null;
-  const [, yyyy, , month, day, hour, minute] = match;
-  const parsed = zonedWallTimeToDate({ year: yyyy, month, day, hour, minute }, TIME_ZONE);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  return parseLeadingZonedTimestamp(value, TIME_ZONE);
 }
 
 function getLastUserTime(messages) {
@@ -475,7 +471,7 @@ ${weatherContext ? `\n${weatherContext}\n` : ""}
   const dayPeriod = getChineseDayPeriod(now, TIME_ZONE);
   const dayOrNight = isDayTime(now) ? "白天" : "夜间";
   const absenceRule = diffMinutes < 24 * 60
-    ? "不足 24 小时，禁止说‘好久不见’、‘好久没来找我’或任何暗示很久未联系的话。"
+    ? "不足 24 小时，禁止提及用户没来、没找你、消失了一天或很久未联系；换一个与缺席时长无关的话题。"
     : "可以准确描述间隔，但不要夸大用户离开的时间。";
 
   // 无论使用文件、环境变量还是默认提示，都在最后追加不可被旧模板遗漏的实时事实。
@@ -519,6 +515,16 @@ async function runWakeUp() {
     console.log("\n暂不需要唤醒\n");
     return;
   }
+
+  console.log(JSON.stringify({
+    event: "wake_due",
+    diff_minutes: diffMinutes,
+    wake_after_minutes: getWakeAfterMinutes(now),
+    current_time: formatDateTimeInTimeZone(now, TIME_ZONE),
+    last_user_time: lastUserTime.toISOString(),
+    time_zone: TIME_ZONE,
+    local_period: getChineseDayPeriod(now, TIME_ZONE)
+  }));
 
   const weatherContext = await fetchWeatherContext();
   const wakePrompt = buildWakePrompt(getChinaTimeString(), diffMinutes, weatherContext);
@@ -694,6 +700,20 @@ ${historyText}`
     // 没有 [NO_ACTION] 就视为想发推送
     console.log("\nAI 选择发送推送\n");
     let barkText = aiText;
+
+    const outputViolations = findWakeOutputViolations(barkText, {
+      diffMinutes,
+      dayPeriod: getChineseDayPeriod(new Date(), TIME_ZONE)
+    });
+    if (outputViolations.length > 0) {
+      console.warn(JSON.stringify({
+        event: "wake_output_rejected",
+        violations: outputViolations,
+        diff_minutes: diffMinutes,
+        local_time: getLocalTimeString()
+      }));
+      eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型时间表述与实际不符）`;
+    }
 
     // 如果 AI 还是写了 [BARK] ... [/BARK] 标签，就剥掉
     const barkMatch = barkText.match(/\[BARK\]([\s\S]*?)\[\/BARK\]/);

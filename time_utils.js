@@ -80,12 +80,21 @@ function zonedWallTimeToDate({ year, month, day, hour, minute }, timeZone = reso
   return Number.isNaN(parsed.getTime()) ? null : parsed;
 }
 
+function parseLeadingZonedTimestamp(value, timeZone = resolveTimeZone()) {
+  const text = String(value || "");
+  const match = text.match(/^（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
+  if (!match) return null;
+  const [, year, , month, day, hour, minute] = match;
+  return zonedWallTimeToDate({ year, month, day, hour, minute }, timeZone);
+}
+
 module.exports = {
   DEFAULT_TIME_ZONE,
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
   getDatePartsInTimeZone,
   getHourInTimeZone,
+  parseLeadingZonedTimestamp,
   resolveTimeZone,
   zonedWallTimeToDate
 };
