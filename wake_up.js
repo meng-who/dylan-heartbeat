@@ -8,6 +8,7 @@ const { findWakeOutputViolations } = require("./wake_guardrails");
 const {
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
+  getChineseWeekday,
   getDatePartsInTimeZone,
   getHourInTimeZone,
   parseLeadingZonedTimestamp,
@@ -469,6 +470,7 @@ ${weatherContext ? `\n${weatherContext}\n` : ""}
 
   const now = new Date();
   const dayPeriod = getChineseDayPeriod(now, TIME_ZONE);
+  const weekday = getChineseWeekday(now, TIME_ZONE);
   const dayOrNight = isDayTime(now) ? "白天" : "夜间";
   const absenceRule = diffMinutes < 24 * 60
     ? "不足 24 小时，禁止提及用户没来、没找你、消失了一天或很久未联系；换一个与缺席时长无关的话题。"
@@ -478,10 +480,12 @@ ${weatherContext ? `\n${weatherContext}\n` : ""}
   return `${prompt.trim()}\n\n## 运行时事实（必须遵守）
 - 用户时区：${TIME_ZONE}
 - 用户当地时间：${currentTime}
+- 今天是：${weekday}
 - 当前时段：${dayOrNight}，${dayPeriod}
 - 距离用户最后一条消息：${diffMinutes} 分钟
 - ${absenceRule}
 - 问候必须符合上面的当地时段；不要根据模型自身时区、旧聊天内容或猜测改写当前时段。
+- 星期由程序准确计算，禁止自行推算或改写。
 - 最近聊天记录由 Gateway 共享给本次唤醒；不要因为换了模型就声称用户没有来找你。`;
 }
 
@@ -523,7 +527,8 @@ async function runWakeUp() {
     current_time: formatDateTimeInTimeZone(now, TIME_ZONE),
     last_user_time: lastUserTime.toISOString(),
     time_zone: TIME_ZONE,
-    local_period: getChineseDayPeriod(now, TIME_ZONE)
+    local_period: getChineseDayPeriod(now, TIME_ZONE),
+    local_weekday: getChineseWeekday(now, TIME_ZONE)
   }));
 
   const weatherContext = await fetchWeatherContext();
@@ -703,7 +708,8 @@ ${historyText}`
 
     const outputViolations = findWakeOutputViolations(barkText, {
       diffMinutes,
-      dayPeriod: getChineseDayPeriod(new Date(), TIME_ZONE)
+      dayPeriod: getChineseDayPeriod(new Date(), TIME_ZONE),
+      weekday: getChineseWeekday(new Date(), TIME_ZONE)
     });
     if (outputViolations.length > 0) {
       console.warn(JSON.stringify({

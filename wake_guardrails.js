@@ -1,4 +1,4 @@
-function findWakeOutputViolations(text, { diffMinutes, dayPeriod } = {}) {
+function findWakeOutputViolations(text, { diffMinutes, dayPeriod, weekday } = {}) {
   const value = String(text || "");
   const violations = [];
 
@@ -24,6 +24,13 @@ function findWakeOutputViolations(text, { diffMinutes, dayPeriod } = {}) {
   };
   const greetingPattern = incompatibleGreetings[dayPeriod];
   if (greetingPattern?.test(value)) violations.push("wrong_local_greeting");
+
+  const expectedWeekday = String(weekday || "").match(/[一二三四五六日天]/)?.[0];
+  const statedWeekdays = [...value.matchAll(/今天(?:是|已经是|又是)?\s*(?:星期|周|礼拜)([一二三四五六日天])/g)]
+    .map(match => match[1]);
+  if (expectedWeekday && statedWeekdays.some(stated => stated !== expectedWeekday)) {
+    violations.push("wrong_local_weekday");
+  }
 
   return violations;
 }

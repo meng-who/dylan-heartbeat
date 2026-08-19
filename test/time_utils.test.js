@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
+  getChineseWeekday,
   getHourInTimeZone,
   parseLeadingZonedTimestamp,
   resolveTimeZone,
@@ -26,6 +27,11 @@ test("formats wake-up time and day/night hour in the configured timezone", () =>
 test("labels the user's local day period instead of the server's period", () => {
   assert.equal(getChineseDayPeriod(new Date("2026-08-17T06:53:00.000Z"), "Asia/Shanghai"), "下午");
   assert.equal(getChineseDayPeriod(new Date("2026-08-17T12:00:00.000Z"), "Asia/Shanghai"), "晚上");
+});
+
+test("calculates the weekday in the user's timezone", () => {
+  assert.equal(getChineseWeekday(new Date("2026-08-19T04:00:00.000Z"), "Asia/Shanghai"), "星期三");
+  assert.equal(getChineseWeekday(new Date("2026-08-18T16:30:00.000Z"), "Asia/Shanghai"), "星期三");
 });
 
 test("only treats a leading Kelivo label as the message timestamp", () => {

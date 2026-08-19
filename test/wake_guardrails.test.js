@@ -22,3 +22,25 @@ test("allows a grounded neutral message", () => {
     []
   );
 });
+
+test("rejects an incorrect explicit weekday claim", () => {
+  assert.deepEqual(
+    findWakeOutputViolations("今天是周二，记得吃午饭。", {
+      diffMinutes: 90,
+      dayPeriod: "中午",
+      weekday: "星期三"
+    }),
+    ["wrong_local_weekday"]
+  );
+});
+
+test("allows the weekday calculated for the user's timezone", () => {
+  assert.deepEqual(
+    findWakeOutputViolations("今天是星期三，记得吃午饭。", {
+      diffMinutes: 90,
+      dayPeriod: "中午",
+      weekday: "星期三"
+    }),
+    []
+  );
+});

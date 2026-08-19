@@ -51,6 +51,13 @@ function getChineseDayPeriod(date = new Date(), timeZone = resolveTimeZone()) {
   return "晚上";
 }
 
+function getChineseWeekday(date = new Date(), timeZone = resolveTimeZone()) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone,
+    weekday: "long"
+  }).format(date);
+}
+
 function getTimeZoneOffsetMs(date, timeZone) {
   const parts = getDatePartsInTimeZone(date, timeZone);
   const asUTC = Date.UTC(
@@ -92,6 +99,7 @@ module.exports = {
   DEFAULT_TIME_ZONE,
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
+  getChineseWeekday,
   getDatePartsInTimeZone,
   getHourInTimeZone,
   parseLeadingZonedTimestamp,
