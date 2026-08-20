@@ -16,6 +16,26 @@ function stampLatestUserActivity(messages, receivedAt) {
   return list;
 }
 
+function createUserActivityRecord(messages, receivedAt) {
+  const list = Array.isArray(messages) ? messages : [];
+  if (!list.some(message => message?.role === "user")) return null;
+  const activityTime = parseValidDate(receivedAt);
+  if (!activityTime) return null;
+  return {
+    last_user_at: activityTime.toISOString(),
+    source: "gateway_request"
+  };
+}
+
+function parseUserActivityRecord(record) {
+  const activityTime = parseValidDate(record?.last_user_at);
+  if (!activityTime) return null;
+  return {
+    time: activityTime,
+    source: String(record?.source || "activity_file")
+  };
+}
+
 function getLatestUserActivity(messages, parseContentTimestamp) {
   const list = Array.isArray(messages) ? messages : [];
   for (let index = list.length - 1; index >= 0; index--) {
@@ -45,6 +65,8 @@ function getLatestUserActivity(messages, parseContentTimestamp) {
 }
 
 module.exports = {
+  createUserActivityRecord,
   getLatestUserActivity,
+  parseUserActivityRecord,
   stampLatestUserActivity
 };

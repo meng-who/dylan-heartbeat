@@ -1,6 +1,11 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { getLatestUserActivity, stampLatestUserActivity } = require("../timeline_activity");
+const {
+  createUserActivityRecord,
+  getLatestUserActivity,
+  parseUserActivityRecord,
+  stampLatestUserActivity
+} = require("../timeline_activity");
 
 test("stamps only the latest user message with the gateway activity time", () => {
   const messages = stampLatestUserActivity([
@@ -31,4 +36,23 @@ test("keeps legacy timestamp fallbacks for an existing timeline", () => {
 
   assert.equal(activity.time.toISOString(), "2026-08-19T05:00:00.000Z");
   assert.equal(activity.source, "received_at");
+});
+
+test("creates and parses a standalone activity record", () => {
+  const record = createUserActivityRecord(
+    [{ role: "assistant" }, { role: "user" }],
+    "2026-08-21T03:20:00.000Z"
+  );
+  assert.deepEqual(record, {
+    last_user_at: "2026-08-21T03:20:00.000Z",
+    source: "gateway_request"
+  });
+
+  const activity = parseUserActivityRecord(record);
+  assert.equal(activity.time.toISOString(), "2026-08-21T03:20:00.000Z");
+  assert.equal(activity.source, "gateway_request");
+});
+
+test("does not create an activity record without a real user message", () => {
+  assert.equal(createUserActivityRecord([{ role: "assistant" }], new Date().toISOString()), null);
 });

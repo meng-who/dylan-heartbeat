@@ -2,6 +2,7 @@
 node_modules
 enhanced_messages.json
 message_timestamps.json
+last_user_activity.json
 enhanced_messages.json*
 *bak*
 .DS_Store

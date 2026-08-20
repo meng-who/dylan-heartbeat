@@ -4,7 +4,7 @@ const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 const { dataPath, resolveDataPath } = require("./storage");
 const { parseChatCompletionResponse } = require("./upstream_response");
-const { getLatestUserActivity } = require("./timeline_activity");
+const { getLatestUserActivity, parseUserActivityRecord } = require("./timeline_activity");
 const { findWakeOutputViolations } = require("./wake_guardrails");
 const {
   formatDateTimeInTimeZone,
@@ -17,6 +17,7 @@ const {
 } = require("./time_utils");
 
 const TIMELINE_PATH = dataPath("enhanced_messages.json");
+const USER_ACTIVITY_PATH = dataPath("last_user_activity.json");
 const PORT = Number(process.env.PORT) || 3000;
 // Gateway 与 wake-up 由 start_all.js 启动在同一容器；内部写请求直接走 loopback，
 // 避免绕公网反代后因来源 IP、旧 .env 或 key 不一致导致心跳被拒绝。
@@ -388,6 +389,16 @@ function loadTimelineMessages() {
   }
 }
 
+function loadRecordedUserActivity() {
+  if (!fs.existsSync(USER_ACTIVITY_PATH)) return null;
+  try {
+    return parseUserActivityRecord(JSON.parse(fs.readFileSync(USER_ACTIVITY_PATH, "utf-8")));
+  } catch (error) {
+    console.error("读取 last_user_activity.json 失败:", error.message);
+    return null;
+  }
+}
+
 function getNow() {
   return new Date();
 }
@@ -482,11 +493,17 @@ async function runWakeUp() {
   const messages = loadTimelineMessages();
   if (!messages) return;
 
-  const lastUserActivity = getLatestUserActivity(
+  const lastUserActivity = loadRecordedUserActivity() || getLatestUserActivity(
     messages,
     content => parseTimelineTimestamp(normalizeContentToText(content))
   );
   if (!lastUserActivity) {
+    console.log(JSON.stringify({
+      event: "wake_user_time_missing",
+      activity_file_exists: fs.existsSync(USER_ACTIVITY_PATH),
+      timeline_total: messages.length,
+      timeline_user_messages: messages.filter(message => message?.role === "user").length
+    }));
     console.log("未找到用户时间");
     return;
   }

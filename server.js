@@ -5,7 +5,7 @@ const fs = require("fs-extra");
 const path = require("path");
 const { dataPath, resolveDataPath } = require("./storage");
 const { decideRequestAccess } = require("./network_access");
-const { stampLatestUserActivity } = require("./timeline_activity");
+const { createUserActivityRecord, stampLatestUserActivity } = require("./timeline_activity");
 const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
@@ -34,6 +34,7 @@ const IS_CLOUD_RUNTIME = Boolean(
 );
 const TIMELINE_FILE = dataPath("enhanced_messages.json");
 const TIMESTAMP_DB_FILE = dataPath("message_timestamps.json");
+const USER_ACTIVITY_FILE = dataPath("last_user_activity.json");
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
 const DEFAULT_RESTART_COMMAND = "self";
@@ -378,6 +379,22 @@ function buildTimeline(kelivoMessages, tsDB, requestReceivedAt = new Date().toIS
   // 当前请求里最后一条 user 消息就是 Gateway 实际看到的最近用户活动。
   // 单独盖章，避免依赖 Kelivo 展示文本中的日期格式。
   const newRealMessages = stampLatestUserActivity(normalizedRealMessages, requestReceivedAt);
+  const activityRecord = createUserActivityRecord(newRealMessages, requestReceivedAt);
+  if (activityRecord) {
+    try {
+      fs.writeJsonSync(USER_ACTIVITY_FILE, activityRecord, { spaces: 2 });
+      console.log(JSON.stringify({
+        event: "user_activity_recorded",
+        last_user_at: activityRecord.last_user_at,
+        storage: "last_user_activity.json"
+      }));
+    } catch (error) {
+      console.error(JSON.stringify({
+        event: "user_activity_record_failed",
+        error: error.message
+      }));
+    }
+  }
 
   const oldSpecialEvents = oldTimeline.filter(isSpecialEvent).sort((a, b) => {
     const timeA = extractTimestampWithMemory(a, tsDB);
