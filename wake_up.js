@@ -4,6 +4,7 @@ const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
 const { dataPath, resolveDataPath } = require("./storage");
 const { parseChatCompletionResponse } = require("./upstream_response");
+const { getLatestUserActivity } = require("./timeline_activity");
 const { findWakeOutputViolations } = require("./wake_guardrails");
 const {
   formatDateTimeInTimeZone,
@@ -409,22 +410,6 @@ function parseTimelineTimestamp(value) {
   return parseLeadingZonedTimestamp(value, TIME_ZONE);
 }
 
-function getLastUserTime(messages) {
-  const reversed = [...messages].reverse();
-  for (const msg of reversed) {
-    if (msg.role === "user") {
-      const content = normalizeContentToText(msg.content);
-      // 批注 2026-07-15：兼容 Kelivo 时间前缀 "YYYY-MM-DDHH:mm"；
-      // 旧的 "YYYY-MM-DD HH:mm" 仍然可用，避免无空格时间导致 wake-up 误判没有用户时间。
-      const parsed = parseTimelineTimestamp(content);
-      if (parsed) return parsed;
-      const fallback = new Date(msg.received_at || msg.created_at || msg.timestamp || "");
-      if (!Number.isNaN(fallback.getTime())) return fallback;
-    }
-  }
-  return null;
-}
-
 function stripPosition(messages) {
   return messages.map(({ position, ...rest }) => rest);
 }
@@ -497,11 +482,15 @@ async function runWakeUp() {
   const messages = loadTimelineMessages();
   if (!messages) return;
 
-  const lastUserTime = getLastUserTime(messages);
-  if (!lastUserTime) {
+  const lastUserActivity = getLatestUserActivity(
+    messages,
+    content => parseTimelineTimestamp(normalizeContentToText(content))
+  );
+  if (!lastUserActivity) {
     console.log("未找到用户时间");
     return;
   }
+  const lastUserTime = lastUserActivity.time;
 
   const now = new Date();
   const diffMinutes = Math.floor((now - lastUserTime) / 1000 / 60);
@@ -514,7 +503,8 @@ async function runWakeUp() {
       wake_after_minutes: getWakeAfterMinutes(now),
       time_zone: TIME_ZONE,
       time_zone_hour: getHourInTimeZone(now, TIME_ZONE),
-      last_user_time: lastUserTime.toISOString()
+      last_user_time: lastUserTime.toISOString(),
+      last_user_time_source: lastUserActivity.source
     }));
     console.log("\n暂不需要唤醒\n");
     return;
@@ -526,6 +516,7 @@ async function runWakeUp() {
     wake_after_minutes: getWakeAfterMinutes(now),
     current_time: formatDateTimeInTimeZone(now, TIME_ZONE),
     last_user_time: lastUserTime.toISOString(),
+    last_user_time_source: lastUserActivity.source,
     time_zone: TIME_ZONE,
     local_period: getChineseDayPeriod(now, TIME_ZONE),
     local_weekday: getChineseWeekday(now, TIME_ZONE)

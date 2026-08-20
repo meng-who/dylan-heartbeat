@@ -5,6 +5,7 @@ const fs = require("fs-extra");
 const path = require("path");
 const { dataPath, resolveDataPath } = require("./storage");
 const { decideRequestAccess } = require("./network_access");
+const { stampLatestUserActivity } = require("./timeline_activity");
 const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
@@ -371,9 +372,12 @@ function buildTimeline(kelivoMessages, tsDB, requestReceivedAt = new Date().toIS
   const latestSP = newSystemMessages.length > 0 ? newSystemMessages[newSystemMessages.length - 1] : null;
   const oldSP = oldTimeline.find(msg => msg.role === "system");
 
-  const newRealMessages = kelivoMessages
+  const normalizedRealMessages = kelivoMessages
     .filter(isRealMessageForTimeline)
     .map(msg => normalizeMessageForTimeline(msg, { receivedAt: requestReceivedAt }));
+  // 当前请求里最后一条 user 消息就是 Gateway 实际看到的最近用户活动。
+  // 单独盖章，避免依赖 Kelivo 展示文本中的日期格式。
+  const newRealMessages = stampLatestUserActivity(normalizedRealMessages, requestReceivedAt);
 
   const oldSpecialEvents = oldTimeline.filter(isSpecialEvent).sort((a, b) => {
     const timeA = extractTimestampWithMemory(a, tsDB);
