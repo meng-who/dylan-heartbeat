@@ -89,7 +89,9 @@ function zonedWallTimeToDate({ year, month, day, hour, minute }, timeZone = reso
 
 function parseLeadingZonedTimestamp(value, timeZone = resolveTimeZone()) {
   const text = String(value || "");
-  const match = text.match(/^（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:[ T]?)(\d{1,2})[:：](\d{2})/);
+  // Kelivo 当前使用 "YYYY-MM-DD  HH:mm\n"（两个空格），旧版本也可能
+  // 使用一个空格、T 或无分隔符，因此这里兼容所有这些前缀格式。
+  const match = text.match(/^（?\s*(\d{4})([-/])(\d{1,2})\2(\d{1,2})(?:T|\s*)(\d{1,2})[:：](\d{2})/);
   if (!match) return null;
   const [, year, , month, day, hour, minute] = match;
   return zonedWallTimeToDate({ year, month, day, hour, minute }, timeZone);

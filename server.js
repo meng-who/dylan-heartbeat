@@ -288,7 +288,7 @@ function stripLeadingTimestamp(content) {
   // 批注 2026-07-15：兼容 Kelivo 有时把日期和时间贴在一起的前缀；
   // 旧格式 "YYYY-MM-DD HH:mm" 继续保留，新格式 "YYYY-MM-DDHH:mm" 不再导致时间记忆/排序失效。
   return String(content || "")
-    .replace(/^（?\s*\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T]?)\d{1,2}[:：]\d{2}[）\s]*/, "")
+    .replace(/^（?\s*\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:T|\s*)\d{1,2}[:：]\d{2}[）\s]*/, "")
     .trim();
 }
 

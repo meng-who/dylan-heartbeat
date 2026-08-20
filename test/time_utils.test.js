@@ -45,6 +45,13 @@ test("only treats a leading Kelivo label as the message timestamp", () => {
   );
 });
 
+test("parses Kelivo's real double-space prompt timestamp", () => {
+  assert.equal(
+    parseLeadingZonedTimestamp("2026-08-20  00:07\n消息正文", "Asia/Shanghai").toISOString(),
+    "2026-08-19T16:07:00.000Z"
+  );
+});
+
 test("falls back when TIME_ZONE is invalid", () => {
   assert.equal(resolveTimeZone("Not/A-Time-Zone"), "Asia/Shanghai");
 });
