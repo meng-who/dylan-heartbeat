@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { findWakeOutputViolations } = require("../wake_guardrails");
+const { findWakeOutputViolations, parseNoActionDirective } = require("../wake_guardrails");
 
 test("rejects invented day-long absences when the user chatted recently", () => {
   assert.deepEqual(
@@ -42,5 +42,25 @@ test("allows the weekday calculated for the user's timezone", () => {
       weekday: "星期三"
     }),
     []
+  );
+});
+
+test("recognizes an escaped no-action marker at the end", () => {
+  assert.deepEqual(
+    parseNoActionDirective("刚推过一条了，不打扰你了[NO\\_ACTION]"),
+    { matched: true, reason: "刚推过一条了，不打扰你了" }
+  );
+});
+
+test("recognizes common no-action marker variants", () => {
+  assert.equal(parseNoActionDirective("[NO_ACTION] 原因：刚联系过").matched, true);
+  assert.equal(parseNoActionDirective("[NO-ACTION]").matched, true);
+  assert.equal(parseNoActionDirective("稍后再说 [NO ACTION]").matched, true);
+});
+
+test("does not mistake ordinary text for a no-action directive", () => {
+  assert.deepEqual(
+    parseNoActionDirective("今天想给你发一条消息"),
+    { matched: false, reason: "" }
   );
 });

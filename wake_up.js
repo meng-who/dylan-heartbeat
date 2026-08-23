@@ -5,7 +5,7 @@ const { buildNtfyPayload } = require("./ntfy_priority");
 const { dataPath, resolveDataPath } = require("./storage");
 const { parseChatCompletionResponse } = require("./upstream_response");
 const { getLatestUserActivity, parseUserActivityRecord } = require("./timeline_activity");
-const { findWakeOutputViolations } = require("./wake_guardrails");
+const { findWakeOutputViolations, parseNoActionDirective } = require("./wake_guardrails");
 const {
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
@@ -482,6 +482,7 @@ ${weatherContext ? `\n${weatherContext}\n` : ""}
 - ${absenceRule}
 - 问候必须符合上面的当地时段；不要根据模型自身时区、旧聊天内容或猜测改写当前时段。
 - 星期由程序准确计算，禁止自行推算或改写。
+- 如果决定不发送，输出必须以未转义的 [NO_ACTION] 开头；不要把标记放在句尾。
 - 最近聊天记录由 Gateway 共享给本次唤醒；不要因为换了模型就声称用户没有来找你。`;
 }
 
@@ -689,6 +690,7 @@ ${historyText}`
   const diaryResult = extractDiaryFromResponse(rawAiText);
   const diarySaved = appendDiaryEntry(diaryResult.diaryContent);
   const aiText = diaryResult.remainingText;
+  const noActionDirective = parseNoActionDirective(aiText);
 
   let eventContent;
 
@@ -698,14 +700,10 @@ ${historyText}`
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：只写日记）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：模型空回复）`;
   // 判断 AI 是否明确要静默
-  } else if (aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/)) {
-    const noActionMatch = aiText.match(/^\[NO_ACTION\]\s*(.{0,20})?/);
+  } else if (noActionDirective.matched) {
     // AI 选择不发送推送
     console.log("\nAI 选择不发送推送\n");
-    let reason = (noActionMatch[1] || "").trim();
-    if (reason.startsWith("原因：") || reason.startsWith("原因:")) {
-      reason = reason.replace(/^原因[：:]\s*/, "").trim();
-    }
+    const reason = noActionDirective.reason;
     eventContent = reason
       ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;

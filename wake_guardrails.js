@@ -35,4 +35,19 @@ function findWakeOutputViolations(text, { diffMinutes, dayPeriod, weekday } = {}
   return violations;
 }
 
-module.exports = { findWakeOutputViolations };
+function parseNoActionDirective(text) {
+  const value = String(text || "").trim();
+  // 兼容 [NO_ACTION]、[NO\_ACTION]、[NO-ACTION]、[NO ACTION]，且不要求位于开头。
+  const match = /\[\s*NO\s*(?:\\?_|-|\s+)\s*ACTION\s*\]/i.exec(value);
+  if (!match) return { matched: false, reason: "" };
+
+  const before = value.slice(0, match.index).trim();
+  const after = value.slice(match.index + match[0].length).trim();
+  const reason = (after || before)
+    .replace(/^原因[：:]\s*/, "")
+    .replace(/^[|｜,，。:：;；\s]+|[|｜,，。:：;；\s]+$/g, "")
+    .slice(0, 20);
+  return { matched: true, reason };
+}
+
+module.exports = { findWakeOutputViolations, parseNoActionDirective };
