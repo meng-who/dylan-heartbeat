@@ -1,9 +1,10 @@
-require("dotenv").config();
+require("dotenv").config({ quiet: true });
 
 const Fastify = require("fastify");
 const fs = require("fs-extra");
 const path = require("path");
-const { dataPath, resolveDataPath } = require("./storage");
+const { dataPath, resolveDataPath, writeJsonAtomicSync } = require("./storage");
+const { isSpecialEventContent } = require("./special_events");
 const { decideRequestAccess } = require("./network_access");
 const { createUserActivityRecord, stampLatestUserActivity } = require("./timeline_activity");
 const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
@@ -274,7 +275,7 @@ function saveTimeline(messages) {
   const maxTimelineMessages = readPositiveIntegerEnv("MAX_TIMELINE_MESSAGES", 50);
   const trimmed = nonSP.slice(-maxTimelineMessages);
   const final = sp ? [sp, ...trimmed] : trimmed;
-  fs.writeJsonSync(TIMELINE_FILE, final, { spaces: 2 });
+  writeJsonAtomicSync(TIMELINE_FILE, final);
 }
 
 // ========================
@@ -305,7 +306,7 @@ function loadTimestampDB() {
 }
 
 function saveTimestampDB(db) {
-  fs.writeJsonSync(TIMESTAMP_DB_FILE, db, { spaces: 2 });
+  writeJsonAtomicSync(TIMESTAMP_DB_FILE, db);
 }
 
 function makeFingerprint(msg) {
@@ -334,16 +335,7 @@ function extractTimestampWithMemory(msg, tsDB) {
 // 消息判断
 // ========================
 function isSpecialEvent(msg) {
-  if (msg.role !== "assistant") return false;
-  const c = normalizeContentToText(msg.content);
-  // 批注 2026-07-11：推送渠道从 Bark 扩展到 ntfy；继续兼容早期时间线里的 Bark/宝宝事件，避免升级后旧唤醒事件丢失。
-  return (
-    c.includes("刚刚给宝宝发了 Bark") ||
-    c.includes("刚刚给用户发了 Bark") ||
-    c.includes("自动唤醒：本次未发送 Bark") ||
-    c.includes("自动唤醒：本次未发送推送") ||
-    (c.includes("刚刚给用户发了") && c.includes("推送"))
-  );
+  return Boolean(msg && msg.role === "assistant" && isSpecialEventContent(normalizeContentToText(msg.content)));
 }
 
 function isRealMessageForTimeline(msg) {
@@ -382,7 +374,7 @@ function buildTimeline(kelivoMessages, tsDB, requestReceivedAt = new Date().toIS
   const activityRecord = createUserActivityRecord(newRealMessages, requestReceivedAt);
   if (activityRecord) {
     try {
-      fs.writeJsonSync(USER_ACTIVITY_FILE, activityRecord, { spaces: 2 });
+      writeJsonAtomicSync(USER_ACTIVITY_FILE, activityRecord);
       console.log(JSON.stringify({
         event: "user_activity_recorded",
         last_user_at: activityRecord.last_user_at,
@@ -574,7 +566,7 @@ function loadPresets() {
 }
 
 function savePresets(presets) {
-  fs.writeJsonSync(PRESETS_FILE, presets, { spaces: 2 });
+  writeJsonAtomicSync(PRESETS_FILE, presets);
 }
 
 function wantsJsonResponse(req) {
@@ -649,6 +641,8 @@ app.addHook("onRequest", (req, reply, done) => {
 // ========================
 // Models
 // ========================
+app.get("/healthz", async () => ({ status: "ok" }));
+
 app.get("/v1/models", async (req, reply) => {
   reply.send({
     object: "list",

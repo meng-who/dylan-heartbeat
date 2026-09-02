@@ -10,7 +10,7 @@
   },
   "keywords": ["fastify", "gateway", "api-gateway", "node-cron", "kelivo"],
   "author": "callie0313",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "type": "commonjs",
   "engines": {
     "node": ">=20"

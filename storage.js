@@ -19,6 +19,24 @@ function resolveDataPath(configuredPath, fallbackName) {
   return dataPath(value);
 }
 
+function writeJsonAtomicSync(filePath, value) {
+  const dir = path.dirname(filePath);
+  fs.mkdirSync(dir, { recursive: true });
+  const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
+  const backup = `${filePath}.bak`;
+
+  fs.writeFileSync(temporary, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  try {
+    if (fs.existsSync(filePath)) fs.copyFileSync(filePath, backup);
+    fs.renameSync(temporary, filePath);
+  } catch (error) {
+    try {
+      fs.unlinkSync(temporary);
+    } catch {}
+    throw error;
+  }
+}
+
 ensureDataDir();
 console.log(`[storage] DATA_DIR=${DATA_DIR}`);
 
@@ -26,5 +44,6 @@ module.exports = {
   DATA_DIR,
   dataPath,
   ensureDataDir,
-  resolveDataPath
+  resolveDataPath,
+  writeJsonAtomicSync
 };
