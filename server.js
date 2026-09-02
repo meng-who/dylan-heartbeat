@@ -6,6 +6,14 @@ const path = require("path");
 const { dataPath, resolveDataPath, writeJsonAtomicSync } = require("./storage");
 const { isSpecialEventContent } = require("./special_events");
 const { decideRequestAccess } = require("./network_access");
+const {
+  cleanPulseArtifacts,
+  fetchPulseReaction,
+  injectPulseState,
+  jsonCompletionToSse,
+  prefixJsonText,
+  prefixSseStream
+} = require("./pulse_sidecar");
 const { createUserActivityRecord, stampLatestUserActivity } = require("./timeline_activity");
 const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
 
@@ -650,6 +658,8 @@ app.get("/v1/models", async (req, reply) => {
   });
 });
 
+// 手机端稳定入口：Kelivo 只连接 Render，再由 Render 访问 Cloudflare Pulse。
+// 原 /v1/* 完全保留，桥接故障时仍可直接切回。
 // ========================
 // Chat Completions
 // ========================
@@ -671,7 +681,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       }
     }));
 
-    const kelivoMessages = body.messages || [];
+    const kelivoMessages = cleanPulseArtifacts(body.messages || []);
     const oldTimeline = loadTimeline();
 
     const tsDB = loadTimestampDB();
@@ -708,6 +718,20 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     console.log("本次注入的特殊事件数量:", readBooleanEnv("INJECT_WAKE_EVENTS", true) ? Math.min(oldEvents.length, readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10)) : 0);
     addAutomationEventContext(llmMessages, oldEvents);
+
+    let pulseContext = null;
+    try {
+      const latestUser = [...kelivoMessages].reverse().find(message => message?.role === "user");
+      pulseContext = await fetchPulseReaction({
+        baseUrl: process.env.PULSE_WORKER_URL,
+        clientKey: process.env.PULSE_CLIENT_KEY,
+        text: normalizeContentToText(latestUser?.content),
+        timeoutMs: Number(process.env.PULSE_TIMEOUT_MS) || 5000
+      });
+      if (pulseContext) injectPulseState(llmMessages, pulseContext.privateState);
+    } catch (error) {
+      console.warn(JSON.stringify({ event: "pulse_bypass", error: String(error?.message || error) }));
+    }
 
     const maxForwardMessages = readPositiveIntegerEnv("MAX_FORWARD_MESSAGES", 60);
     const maxForwardTextChars = readPositiveIntegerEnv("MAX_FORWARD_TEXT_CHARS", 250000);
@@ -850,23 +874,42 @@ app.post("/v1/chat/completions", async (req, reply) => {
     // 批注 2026-07-11：Kelivo 关闭 stream 时需要收到普通 JSON；只在请求或上游确认为 SSE 时才按流式直通。
     if (!shouldStreamResponse) {
       const responseText = await response.text();
+      let outputText = responseText;
+      if (pulseContext?.statusBar && upstreamContentType.includes("application/json")) {
+        try { outputText = prefixJsonText(responseText, pulseContext.statusBar); } catch {}
+      }
       return reply
         .code(response.status)
         .header("Content-Type", upstreamContentType || "application/json")
-        .send(responseText);
+        .send(outputText);
     }
 
     if (!response.body) {
       return reply.code(response.status).send({ error: "上游 API 没有返回可读取的响应体" });
     }
 
+    if (requestedStream && !upstreamContentType.includes("text/event-stream")) {
+      const responseText = await response.text();
+      let outputText;
+      try { outputText = jsonCompletionToSse(responseText, pulseContext?.statusBar || ""); }
+      catch { outputText = `${responseText}\n\ndata: [DONE]\n\n`; }
+      reply.raw.writeHead(response.status, {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive"
+      });
+      reply.raw.end(outputText);
+      return;
+    }
+
     reply.raw.writeHead(response.status, {
-      "Content-Type": upstreamContentType || "text/event-stream",
+      "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache",
       Connection: "keep-alive"
     });
 
-    const reader = response.body.getReader();
+    const decoratedBody = pulseContext?.statusBar ? prefixSseStream(response.body, pulseContext.statusBar) : response.body;
+    const reader = decoratedBody.getReader();
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
