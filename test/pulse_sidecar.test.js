@@ -3,10 +3,16 @@ const assert = require("node:assert/strict");
 
 const {
   cleanPulseArtifacts,
+  decorateJsonCompletion,
+  extractPulseReaction,
+  fetchPulsePreparation,
   fetchPulseReaction,
+  finalizePulseReaction,
+  injectPulseProtocol,
   injectPulseState,
   jsonCompletionToSse,
-  prefixSseStream
+  prefixSseStream,
+  semanticPulseSseStream
 } = require("../pulse_sidecar");
 
 test("cleans old visible and private Pulse state", () => {
@@ -51,4 +57,90 @@ test("converts a JSON completion for a streaming Kelivo request", () => {
   assert.match(output, /chat.completion.chunk/);
   assert.match(output, /♡ 76 bpm/);
   assert.match(output, /data: \[DONE\]/);
+});
+
+test("injects a mandatory hidden semantic protocol exactly once", () => {
+  const messages = [{ role: "system", content: "角色设定" }, { role: "user", content: "抱抱我" }];
+  injectPulseProtocol(messages);
+  injectPulseProtocol(messages);
+  assert.equal((messages[0].content.match(/<pulse_protocol>/g) || []).length, 1);
+  assert.match(messages[0].content, /否定、假设、引用、第三方经历/);
+});
+
+test("extracts a valid reaction and never exposes its hidden block", () => {
+  const result = extractPulseReaction(
+    '<pulse_reaction>{"confidence":0.9,"emotion":{"label":"亲近","intensity":0.8},"senses":[{"channel":"touch","kind":"embrace","intensity":0.7}]}</pulse_reaction>\n抱住你。'
+  );
+  assert.equal(result.reaction.emotion.label, "亲近");
+  assert.equal(result.reaction.senses[0].kind, "embrace");
+  assert.equal(result.text, "抱住你。");
+  assert.doesNotMatch(result.text, /pulse_reaction/);
+});
+
+test("rejects invented reaction fields and strips malformed hidden output", () => {
+  const invalid = extractPulseReaction(
+    '<pulse_reaction>{"confidence":1,"emotion":null,"senses":[{"channel":"vision","kind":"secret","intensity":1}]}</pulse_reaction>正常回复'
+  );
+  assert.equal(invalid.reaction, null);
+  assert.equal(invalid.text, "正常回复");
+  const incomplete = extractPulseReaction("<pulse_reaction>{broken");
+  assert.equal(incomplete.reaction, null);
+  assert.equal(incomplete.text, "");
+});
+
+test("prepares and finalizes Pulse through separate safe endpoints", async () => {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url, body: JSON.parse(init.body) });
+    return Response.json({ privateState: "<pulse_state>状态</pulse_state>", statusBar: "♡ 80 bpm" });
+  };
+  await fetchPulsePreparation({ baseUrl: "https://pulse.example.com", clientKey: "k", fetchImpl });
+  await finalizePulseReaction({
+    baseUrl: "https://pulse.example.com", clientKey: "k", fallbackText: "抱抱",
+    reaction: { confidence: 0.9, emotion: null, senses: [] }, fetchImpl
+  });
+  await finalizePulseReaction({ baseUrl: "https://pulse.example.com", clientKey: "k", fallbackText: "抱抱", reaction: null, fetchImpl });
+  assert.match(calls[0].url, /\/api\/prepare$/);
+  assert.match(calls[1].url, /\/api\/apply$/);
+  assert.match(calls[2].url, /\/api\/react$/);
+  assert.equal(calls[2].body.text, "抱抱");
+});
+
+test("decorates JSON with the post-reaction status and strips metadata", async () => {
+  let received;
+  const hidden = '<pulse_reaction>{"confidence":0.9,"emotion":{"label":"亲近","intensity":0.8},"senses":[]}</pulse_reaction>\n在。';
+  const output = await decorateJsonCompletion(JSON.stringify({
+    choices: [{ message: { role: "assistant", content: hidden } }]
+  }), {
+    fallbackStatusBar: "♡ old",
+    finalize: async reaction => { received = reaction; return { statusBar: "♡ new" }; }
+  });
+  const payload = JSON.parse(output);
+  assert.equal(received.emotion.label, "亲近");
+  assert.match(payload.choices[0].message.content, /^♡ new\n\n在。$/);
+  assert.doesNotMatch(payload.choices[0].message.content, /pulse_reaction/);
+});
+
+test("buffers a split semantic SSE header, applies it, and never leaks it", async () => {
+  const encoder = new TextEncoder();
+  const reactionJson = '{"confidence":0.92,"emotion":{"label":"受惊","intensity":0.9},"senses":[{"channel":"sound","kind":"shout","intensity":0.95}]}';
+  const chunks = [
+    'data: {"choices":[{"delta":{"role":"assistant","content":"<pulse_re"}}]}\n\n',
+    `data: ${JSON.stringify({ choices: [{ delta: { content: `action>${reactionJson}</pulse_reaction>别喊。` } }] })}\n\n`,
+    'data: [DONE]\n\n'
+  ];
+  let received;
+  const source = new ReadableStream({ start(controller) {
+    for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+    controller.close();
+  }});
+  const output = await new Response(semanticPulseSseStream(source, {
+    fallbackStatusBar: "♡ old",
+    finalize: async reaction => { received = reaction; return { statusBar: "♡ new" }; }
+  })).text();
+  assert.equal(received.senses[0].kind, "shout");
+  assert.match(output, /♡ new/);
+  assert.match(output, /别喊/);
+  assert.doesNotMatch(output, /pulse_reaction|confidence/);
+  assert.equal((output.match(/data: \[DONE\]/g) || []).length, 1);
 });

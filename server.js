@@ -8,11 +8,13 @@ const { isSpecialEventContent } = require("./special_events");
 const { decideRequestAccess } = require("./network_access");
 const {
   cleanPulseArtifacts,
-  fetchPulseReaction,
+  decorateJsonCompletion,
+  fetchPulsePreparation,
+  finalizePulseReaction,
+  injectPulseProtocol,
   injectPulseState,
   jsonCompletionToSse,
-  prefixJsonText,
-  prefixSseStream
+  semanticPulseSseStream
 } = require("./pulse_sidecar");
 const { createUserActivityRecord, stampLatestUserActivity } = require("./timeline_activity");
 const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
@@ -720,15 +722,19 @@ app.post("/v1/chat/completions", async (req, reply) => {
     addAutomationEventContext(llmMessages, oldEvents);
 
     let pulseContext = null;
+    const semanticPulseEnabled = readBooleanEnv("PULSE_SEMANTIC_ENABLED", true);
+    const latestUser = [...kelivoMessages].reverse().find(message => message?.role === "user");
+    const latestUserText = normalizeContentToText(latestUser?.content);
     try {
-      const latestUser = [...kelivoMessages].reverse().find(message => message?.role === "user");
-      pulseContext = await fetchPulseReaction({
+      pulseContext = await fetchPulsePreparation({
         baseUrl: process.env.PULSE_WORKER_URL,
         clientKey: process.env.PULSE_CLIENT_KEY,
-        text: normalizeContentToText(latestUser?.content),
         timeoutMs: Number(process.env.PULSE_TIMEOUT_MS) || 5000
       });
-      if (pulseContext) injectPulseState(llmMessages, pulseContext.privateState);
+      if (pulseContext) {
+        injectPulseState(llmMessages, pulseContext.privateState);
+        if (semanticPulseEnabled) injectPulseProtocol(llmMessages);
+      }
     } catch (error) {
       console.warn(JSON.stringify({ event: "pulse_bypass", error: String(error?.message || error) }));
     }
@@ -824,6 +830,13 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }
 
     const requestedStream = body?.stream === true;
+    const finalizeSemanticPulse = reaction => finalizePulseReaction({
+      baseUrl: process.env.PULSE_WORKER_URL,
+      clientKey: process.env.PULSE_CLIENT_KEY,
+      reaction,
+      fallbackText: latestUserText,
+      timeoutMs: Number(process.env.PULSE_TIMEOUT_MS) || 5000
+    });
 
     const primaryModel = String(body?.model || "").trim();
     const backupModel = String(process.env.BACKUP_MODEL_NAME || "").trim();
@@ -875,8 +888,13 @@ app.post("/v1/chat/completions", async (req, reply) => {
     if (!shouldStreamResponse) {
       const responseText = await response.text();
       let outputText = responseText;
-      if (pulseContext?.statusBar && upstreamContentType.includes("application/json")) {
-        try { outputText = prefixJsonText(responseText, pulseContext.statusBar); } catch {}
+      if (pulseContext && upstreamContentType.includes("application/json")) {
+        try {
+          outputText = await decorateJsonCompletion(responseText, {
+            fallbackStatusBar: pulseContext.statusBar,
+            finalize: finalizeSemanticPulse
+          });
+        } catch {}
       }
       return reply
         .code(response.status)
@@ -891,7 +909,15 @@ app.post("/v1/chat/completions", async (req, reply) => {
     if (requestedStream && !upstreamContentType.includes("text/event-stream")) {
       const responseText = await response.text();
       let outputText;
-      try { outputText = jsonCompletionToSse(responseText, pulseContext?.statusBar || ""); }
+      try {
+        const decorated = pulseContext
+          ? await decorateJsonCompletion(responseText, {
+              fallbackStatusBar: pulseContext.statusBar,
+              finalize: finalizeSemanticPulse
+            })
+          : responseText;
+        outputText = jsonCompletionToSse(decorated, "");
+      }
       catch { outputText = `${responseText}\n\ndata: [DONE]\n\n`; }
       reply.raw.writeHead(response.status, {
         "Content-Type": "text/event-stream; charset=utf-8",
@@ -908,7 +934,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
       Connection: "keep-alive"
     });
 
-    const decoratedBody = pulseContext?.statusBar ? prefixSseStream(response.body, pulseContext.statusBar) : response.body;
+    const decoratedBody = pulseContext
+      ? semanticPulseSseStream(response.body, {
+          fallbackStatusBar: pulseContext.statusBar,
+          finalize: finalizeSemanticPulse
+        })
+      : response.body;
     const reader = decoratedBody.getReader();
     while (true) {
       const { done, value } = await reader.read();
