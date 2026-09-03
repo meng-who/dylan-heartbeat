@@ -88,6 +88,14 @@ test("rejects invented reaction fields and strips malformed hidden output", () =
   assert.equal(incomplete.text, "");
 });
 
+test("strips a valid hidden reaction even when the model wraps it in a code fence", () => {
+  const result = extractPulseReaction(
+    '```json\n<pulse_reaction>{"confidence":0.8,"emotion":null,"senses":[]}</pulse_reaction>\n```\n正常回复'
+  );
+  assert.equal(result.reaction.confidence, 0.8);
+  assert.equal(result.text, "正常回复");
+});
+
 test("prepares and finalizes Pulse through separate safe endpoints", async () => {
   const calls = [];
   const fetchImpl = async (url, init) => {

@@ -157,7 +157,8 @@ function extractPulseReaction(text) {
   if (!match) return { reaction: null, text: input.replace(/<pulse_reaction>[\s\S]*$/i, "").trimStart() };
   let reaction = null;
   try { reaction = normalizeSemanticReaction(JSON.parse(match[1])); } catch {}
-  return { reaction, text: input.replace(PULSE_REACTION_BLOCK, "").trimStart() };
+  const fencedBlock = new RegExp("(?:" + "```" + ")(?:json|xml)?\\s*" + PULSE_REACTION_BLOCK.source + "\\s*(?:" + "```" + ")", "i");
+  return { reaction, text: input.replace(fencedBlock, "").replace(PULSE_REACTION_BLOCK, "").trimStart() };
 }
 
 function prefixJsonText(text, statusBar) {
@@ -319,10 +320,10 @@ function semanticPulseSseStream(body, { fallbackStatusBar = "", finalize }) {
         if (!choice) { pendingLines.push(`${line}\n`); return; }
         template ||= payload;
         pendingContent += choice.delta.content;
-        const trimmed = pendingContent.trimStart();
         const complete = /<\/pulse_reaction>/i.test(pendingContent);
-        const possiblePrefix = "<pulse_reaction>".startsWith(trimmed) || /^<pulse_reaction>/i.test(trimmed);
-        if (complete || !possiblePrefix || pendingContent.length > 8192) await resolvePending();
+        // 为保证隐藏元数据绝不泄漏，在拿到完整反应单前最多缓冲 8192 字符。
+        // 不合规模型会在回复结束时走规则兜底，只是失去本轮流式首字速度。
+        if (complete || pendingContent.length > 8192) await resolvePending();
       };
 
       try {
