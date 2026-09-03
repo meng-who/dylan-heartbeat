@@ -6,6 +6,7 @@ const path = require("path");
 const { dataPath, resolveDataPath, writeJsonAtomicSync } = require("./storage");
 const { isSpecialEventContent } = require("./special_events");
 const { decideRequestAccess } = require("./network_access");
+const { fetchPulseDashboard } = require("./pulse_dashboard_proxy");
 const {
   cleanPulseArtifacts,
   decorateJsonCompletion,
@@ -659,6 +660,39 @@ app.get("/v1/models", async (req, reply) => {
     data: [{ id: configuredModelName(), object: "model", created: 0, owned_by: "gateway" }]
   });
 });
+
+async function relayPulseDashboard(req, reply, targetPath) {
+  try {
+    const method = req.method;
+    const body = method === "POST"
+      ? new URLSearchParams(Object.entries(req.body || {}).map(([key, value]) => [key, String(value)])).toString()
+      : undefined;
+    const result = await fetchPulseDashboard({
+      baseUrl: process.env.PULSE_WORKER_URL,
+      targetPath,
+      method,
+      cookie: req.headers.cookie || "",
+      contentType: method === "POST" ? "application/x-www-form-urlencoded" : "",
+      body
+    });
+    reply.code(result.status);
+    reply.header("Content-Type", result.contentType);
+    reply.header("Cache-Control", result.cacheControl);
+    if (result.location) reply.header("Location", result.location);
+    if (result.setCookie) reply.header("Set-Cookie", result.setCookie);
+    return reply.send(Buffer.from(result.body));
+  } catch (error) {
+    console.warn(JSON.stringify({ event: "pulse_dashboard_bypass", error: String(error?.message || error) }));
+    return reply.code(502).type("text/html; charset=utf-8").send(
+      "<!doctype html><meta charset=utf-8><title>Pulse 暂时不可用</title><body style='font-family:system-ui;padding:32px;background:#171118;color:#f7edf2'><h1>Pulse 暂时连接不上</h1><p>聊天不会受影响，请稍后刷新这个页面。</p></body>"
+    );
+  }
+}
+
+app.get("/pulse", (req, reply) => relayPulseDashboard(req, reply, "/body"));
+app.get("/pulse/", (req, reply) => relayPulseDashboard(req, reply, "/body"));
+app.post("/pulse/login", (req, reply) => relayPulseDashboard(req, reply, "/body/login"));
+app.get("/pulse/api/state", (req, reply) => relayPulseDashboard(req, reply, "/api/state"));
 
 // 手机端稳定入口：Kelivo 只连接 Render，再由 Render 访问 Cloudflare Pulse。
 // 原 /v1/* 完全保留，桥接故障时仍可直接切回。

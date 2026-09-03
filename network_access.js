@@ -22,7 +22,7 @@ function decideRequestAccess({
   headerKey
 }) {
   const requestPath = String(path || "").split("?")[0];
-  if (requestPath.startsWith("/admin") || requestPath === "/healthz" || requestPath === "/test-bark") {
+  if (requestPath.startsWith("/admin") || requestPath.startsWith("/pulse") || requestPath === "/healthz" || requestPath === "/test-bark") {
     return { allow: true };
   }
 
