@@ -77,6 +77,14 @@ test("extracts a valid reaction and never exposes its hidden block", () => {
   assert.doesNotMatch(result.text, /pulse_reaction/);
 });
 
+test("accepts surprise as a validated semantic emotion", () => {
+  const result = extractPulseReaction(
+    '<pulse_reaction>{"confidence":0.94,"emotion":{"label":"惊喜","intensity":0.88},"senses":[]}</pulse_reaction>没想到是礼物。'
+  );
+  assert.equal(result.reaction.emotion.label, "惊喜");
+  assert.equal(result.text, "没想到是礼物。");
+});
+
 test("rejects invented reaction fields and strips malformed hidden output", () => {
   const invalid = extractPulseReaction(
     '<pulse_reaction>{"confidence":1,"emotion":null,"senses":[{"channel":"vision","kind":"secret","intensity":1}]}</pulse_reaction>正常回复'

@@ -5,7 +5,7 @@ const STATUS_LINE = /^\s*(?:>\s*)?♡\s*\d{2,3}\s*bpm\s*·[^\n]*(?:\r?\n){1,2}/u
 
 const PULSE_PROTOCOL = `<pulse_protocol>
 在每次回复最开头，先输出且只输出一个隐藏身体反应单，紧接着再正常回复：
-<pulse_reaction>{"confidence":0到1,"emotion":null或{"label":"平静|开心|亲近|兴奋|难过|紧张|生气|受惊","intensity":0到1},"senses":[{"channel":"touch|smell|taste|sound","kind":"允许值","intensity":0到1}]}</pulse_reaction>
+<pulse_reaction>{"confidence":0到1,"emotion":null或{"label":"平静|开心|亲近|兴奋|惊喜|难过|紧张|生气|受惊","intensity":0到1},"senses":[{"channel":"touch|smell|taste|sound","kind":"允许值","intensity":0到1}]}</pulse_reaction>
 kind 允许值：touch=embrace|kiss|caress|contact|pain|water|texture|cold|warm|other；smell=clean|personal|floral|food|smoke|chemical|unpleasant|other；taste=sweet|spicy|bitter|sour|salty|other；sound=shout|whisper|music|weather|voice|noise|impact|other。
 只记录你在当前对话中实际感受到、或你在本次回复中确实做出的动作。否定、假设、引用、第三方经历和未执行的请求不算。结合最近上下文、说话方式和动作对象判断；没有变化时 emotion=null、senses=[]。不要在正常回复里解释或复述反应单。
 </pulse_protocol>`;
@@ -125,7 +125,7 @@ function normalizeSemanticReaction(value) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const confidence = Number(value.confidence);
   if (!Number.isFinite(confidence) || confidence < 0 || confidence > 1) return null;
-  const allowedEmotions = new Set(["平静", "开心", "亲近", "兴奋", "难过", "紧张", "生气", "受惊"]);
+  const allowedEmotions = new Set(["平静", "开心", "亲近", "兴奋", "惊喜", "难过", "紧张", "生气", "受惊"]);
   let emotion = null;
   if (value.emotion != null) {
     const label = String(value.emotion?.label || "");
