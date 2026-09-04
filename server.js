@@ -667,15 +667,21 @@ app.get("/v1/models", async (req, reply) => {
 async function relayPulseDashboard(req, reply, targetPath) {
   try {
     const method = req.method;
+    const incomingContentType = String(req.headers["content-type"] || "");
+    const isJson = incomingContentType.includes("application/json");
     const body = method === "POST"
-      ? new URLSearchParams(Object.entries(req.body || {}).map(([key, value]) => [key, String(value)])).toString()
+      ? isJson
+        ? JSON.stringify(req.body || {})
+        : new URLSearchParams(Object.entries(req.body || {}).map(([key, value]) => [key, String(value)])).toString()
       : undefined;
     const result = await fetchPulseDashboard({
       baseUrl: process.env.PULSE_WORKER_URL,
       targetPath,
       method,
       cookie: req.headers.cookie || "",
-      contentType: method === "POST" ? "application/x-www-form-urlencoded" : "",
+      contentType: method === "POST"
+        ? isJson ? "application/json" : "application/x-www-form-urlencoded"
+        : "",
       body
     });
     reply.code(result.status);
@@ -696,6 +702,7 @@ app.get("/pulse", (req, reply) => relayPulseDashboard(req, reply, "/body"));
 app.get("/pulse/", (req, reply) => relayPulseDashboard(req, reply, "/body"));
 app.post("/pulse/login", (req, reply) => relayPulseDashboard(req, reply, "/body/login"));
 app.get("/pulse/api/state", (req, reply) => relayPulseDashboard(req, reply, "/api/state"));
+app.post("/pulse/api/solo/settings", (req, reply) => relayPulseDashboard(req, reply, "/api/solo/settings"));
 
 // 手机端稳定入口：Kelivo 只连接 Render，再由 Render 访问 Cloudflare Pulse。
 // 原 /v1/* 完全保留，桥接故障时仍可直接切回。

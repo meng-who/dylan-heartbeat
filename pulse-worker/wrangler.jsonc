@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dylan-pulse",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  "workers_dev": true,
+  "vars": {
+    "PULSE_PROFILE": "default",
+    "STATUS_BAR_ENABLED": "true"
+  },
+  "secrets": {
+    "required": [
+      "PULSE_CLIENT_KEY",
+      "DYLAN_GATEWAY_BASE_URL",
+      "DYLAN_GATEWAY_KEY",
+      "DASHBOARD_PASSWORD",
+      "SESSION_SECRET"
+    ]
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pulse-state",
+      "database_id": "d7a19e69-31c5-4ed7-926d-393063febb8f",
+      "migrations_dir": "migrations"
+    }
+  ]
+}

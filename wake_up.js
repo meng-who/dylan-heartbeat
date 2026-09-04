@@ -7,6 +7,7 @@ const { parseChatCompletionResponse } = require("./upstream_response");
 const { getLatestUserActivity, parseUserActivityRecord } = require("./timeline_activity");
 const { findWakeOutputViolations, parseNoActionDirective } = require("./wake_guardrails");
 const { isSpecialEventContent } = require("./special_events");
+const { runSoloCycle } = require("./solo_runtime");
 const {
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
@@ -805,6 +806,64 @@ ${historyText}
   }
 }
 
+async function runSoloCheck() {
+  if (!readBooleanEnv("SOLO_ENABLED", false)) return { ran: false, reason: "scheduler_disabled" };
+  if (!process.env.PULSE_WORKER_URL || !process.env.PULSE_CLIENT_KEY) {
+    return { ran: false, reason: "pulse_not_configured" };
+  }
+
+  const messages = loadTimelineMessages();
+  if (!messages) return { ran: false, reason: "timeline_missing" };
+  const lastUserActivity = loadRecordedUserActivity() || getLatestUserActivity(
+    messages,
+    content => parseTimelineTimestamp(normalizeContentToText(content))
+  );
+  if (!lastUserActivity) return { ran: false, reason: "user_activity_missing" };
+
+  const baseSystem = messages.find(message => message?.role === "system");
+  const systemPrompt = baseSystem
+    ? normalizeContentToText(baseSystem.content).split("## Memories")[0].trim()
+    : "";
+  const getLatestUserAtMs = () => {
+    const currentMessages = loadTimelineMessages() || messages;
+    const current = loadRecordedUserActivity() || getLatestUserActivity(
+      currentMessages,
+      content => parseTimelineTimestamp(normalizeContentToText(content))
+    );
+    return current?.time?.getTime?.() || NaN;
+  };
+
+  const result = await runSoloCycle({
+    pulseBaseUrl: process.env.PULSE_WORKER_URL,
+    pulseClientKey: process.env.PULSE_CLIENT_KEY,
+    pulseTimeoutMs: readPositiveTimeout("PULSE_TIMEOUT_MS", 5000),
+    ombreUrl: process.env.OMBRE_MCP_URL,
+    ombreToken: process.env.OMBRE_MCP_TOKEN,
+    ombreTimeoutMs: readPositiveTimeout("OMBRE_MCP_TIMEOUT_MS", 12_000),
+    apiUrl: process.env.TARGET_API_URL,
+    apiKey: process.env.TARGET_API_KEY,
+    model: process.env.MODEL_NAME,
+    backupModel: process.env.BACKUP_MODEL_NAME,
+    modelTimeoutMs: WAKE_UPSTREAM_TIMEOUT_MS,
+    lastUserAt: lastUserActivity.time.toISOString(),
+    messages: getWakeHistoryMessages(messages),
+    systemPrompt,
+    getLatestUserAt: getLatestUserAtMs,
+    sendPush: sendPushNotification,
+    logger: console
+  });
+  console.log(JSON.stringify({
+    event: "solo_cycle_result",
+    ran: result.ran,
+    reason: result.reason,
+    mode: result.mode || null,
+    recall_used: Boolean(result.recallUsed),
+    notify_wanted: Boolean(result.notifyWanted),
+    notified: Boolean(result.notified)
+  }));
+  return result;
+}
+
 // 从第一个有效坐标开始，所有路径都指向同一处。此阈值已锁定。
 function getCheckIntervalMs() {
   // 批注 2026-06-26：公开版允许用户在管理页调整唤醒检查频率；默认值保持旧版白天10分钟、夜间2小时。
@@ -825,7 +884,16 @@ async function scheduleNextCheck() {
     } catch (error) {
       console.error("心跳发送失败:", error.message);
     }
-    await runWakeUp();
+    let soloResult = { ran: false, reason: "not_checked" };
+    try {
+      soloResult = await runSoloCheck();
+    } catch (error) {
+      console.error("Solo 检查失败，继续普通唤醒:", error.message);
+    }
+    // Solo 已完成、被用户打断或已经占用本轮时，不再紧接着跑普通唤醒，避免一次检查产生两次模型请求/推送。
+    if (!soloResult.ran && !soloResult.cancelled && soloResult.reason !== "already_running") {
+      await runWakeUp();
+    }
   } catch (err) {
     console.error("唤醒检查出错:", err);
   }

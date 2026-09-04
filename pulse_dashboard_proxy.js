@@ -9,6 +9,7 @@ function rewriteDashboardHtml(html) {
   return String(html || "")
     .replaceAll('action="/body/login"', 'action="/pulse/login"')
     .replaceAll("fetch('/api/state'", "fetch('/pulse/api/state'")
+    .replaceAll("fetch('/api/solo/settings'", "fetch('/pulse/api/solo/settings'")
     .replaceAll("location.href = '/body'", "location.href = '/pulse'");
 }
 
@@ -35,7 +36,7 @@ async function fetchPulseDashboard({
   const headers = new Headers();
   if (cookie) headers.set("cookie", cookie);
   if (contentType) headers.set("content-type", contentType);
-  headers.set("accept", targetPath === "/api/state" ? "application/json" : "text/html");
+  headers.set("accept", targetPath.startsWith("/api/") ? "application/json" : "text/html");
   const response = await fetchImpl(joinPulseUrl(baseUrl, targetPath), {
     method,
     headers,

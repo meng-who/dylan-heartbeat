@@ -1,0 +1,5 @@
+PULSE_CLIENT_KEY=replace-with-a-long-random-client-key
+DYLAN_GATEWAY_BASE_URL=https://your-dylan-gateway.example.com
+DYLAN_GATEWAY_KEY=replace-with-your-existing-gateway-api-key
+DASHBOARD_PASSWORD=replace-with-a-strong-dashboard-password
+SESSION_SECRET=replace-with-another-long-random-secret

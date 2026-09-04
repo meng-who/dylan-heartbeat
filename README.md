@@ -344,6 +344,23 @@ WAKE_DAY_END_HOUR=24
 - `DAY_CHECK_INTERVAL_MINUTES` / `NIGHT_CHECK_INTERVAL_MINUTES`：后台多久检查一次是否应该唤醒。
 - `WAKE_DAY_START_HOUR` / `WAKE_DAY_END_HOUR`：哪一段时间算“白天”；不在白天范围内就按夜间策略处理。
 
+## 🌙 Solo AI（独处事件）
+
+Solo 是独立于普通聊天和主动唤醒的后台体验。Pulse 会缓慢积累“想独处一下”的欲望；达到面板阈值且你离开了一段时间后，Dylan 才会运行一次。AI 会在 `recall`（真实回忆）、`fantasy`（私人幻想）或 `mix`（回忆延伸为幻想）中经历一次独处，并自行决定要不要给你发一条很短的推送。你一回来发消息，正在进行的 Solo 会立即停止。
+
+真实回忆由 Dylan 直接从 Ombre Brain 的只读 MCP 工具取得，不依赖模型临时决定是否调用工具；MCP 没有结果或暂时断线时会退回 `fantasy`，不会把幻想伪装成真实回忆。Solo 的完整经过只进入受密码保护的身体面板和下一次聊天的私密状态，不会写进普通聊天记录。
+
+首次启用需要在 Render 添加：
+
+```env
+SOLO_ENABLED=true
+OMBRE_MCP_URL=https://你的-ombre服务.onrender.com/mcp
+OMBRE_MCP_TOKEN=你的Ombre静态Token
+OMBRE_MCP_TIMEOUT_MS=12000
+```
+
+先保持 `SOLO_ENABLED=false`，等 Ombre 地址与 Token 填好后再改成 `true`。Token 只放 Render Secret，不要发送到聊天或提交 GitHub。欲望阈值、离开多久才触发、冷却时间和总开关，可在 `/pulse` 身体状态面板里修改。
+
 ## 🌦️ 天气注入
 
 Dylan Heartbeat 可以在自动唤醒时，把当前天气作为一小段背景信息交给模型。天气使用 [Open-Meteo](https://open-meteo.com/) 免费接口，不需要 API Key。
