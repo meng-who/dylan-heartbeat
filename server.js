@@ -971,7 +971,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
     const decoratedBody = pulseContext
       ? semanticPulseSseStream(response.body, {
           fallbackStatusBar: pulseContext.statusBar,
-          finalize: finalizeSemanticPulse
+          finalize: finalizeSemanticPulse,
+          toolAware: Array.isArray(body?.tools) && body.tools.length > 0
         })
       : response.body;
     const reader = decoratedBody.getReader();

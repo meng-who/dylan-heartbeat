@@ -137,6 +137,28 @@ test("decorates JSON with the post-reaction status and strips metadata", async (
   assert.doesNotMatch(payload.choices[0].message.content, /pulse_reaction/);
 });
 
+test("keeps an intermediate JSON tool call content-free", async () => {
+  let finalized = false;
+  const hidden = '<pulse_reaction>{"confidence":0.8,"emotion":null,"senses":[]}</pulse_reaction>';
+  const output = await decorateJsonCompletion(JSON.stringify({
+    choices: [{
+      message: {
+        role: "assistant",
+        content: hidden,
+        tool_calls: [{ id: "call_1", type: "function", function: { name: "search", arguments: "{}" } }]
+      },
+      finish_reason: "tool_calls"
+    }]
+  }), {
+    fallbackStatusBar: "♡ must not appear",
+    finalize: async () => { finalized = true; return { statusBar: "♡ must not appear" }; }
+  });
+  const payload = JSON.parse(output);
+  assert.equal(payload.choices[0].message.content, null);
+  assert.equal(payload.choices[0].message.tool_calls[0].function.name, "search");
+  assert.equal(finalized, false);
+});
+
 test("buffers a split semantic SSE header, applies it, and never leaks it", async () => {
   const encoder = new TextEncoder();
   const reactionJson = '{"confidence":0.92,"emotion":{"label":"受惊","intensity":0.9},"senses":[{"channel":"sound","kind":"shout","intensity":0.95}]}';
@@ -158,5 +180,31 @@ test("buffers a split semantic SSE header, applies it, and never leaks it", asyn
   assert.match(output, /♡ new/);
   assert.match(output, /别喊/);
   assert.doesNotMatch(output, /pulse_reaction|confidence/);
+  assert.equal((output.match(/data: \[DONE\]/g) || []).length, 1);
+});
+
+test("passes an SSE tool call through without status text or Pulse settlement", async () => {
+  const encoder = new TextEncoder();
+  const hidden = '<pulse_reaction>{"confidence":0.8,"emotion":null,"senses":[]}</pulse_reaction>';
+  const chunks = [
+    `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", content: hidden } }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: { tool_calls: [{ index: 0, id: "call_1", type: "function", function: { name: "search", arguments: "{}" } }] }, finish_reason: null }] })}\n\n`,
+    `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "tool_calls" }] })}\n\n`,
+    "data: [DONE]\n\n"
+  ];
+  let finalized = false;
+  const source = new ReadableStream({ start(controller) {
+    for (const chunk of chunks) controller.enqueue(encoder.encode(chunk));
+    controller.close();
+  }});
+  const output = await new Response(semanticPulseSseStream(source, {
+    fallbackStatusBar: "♡ must not appear",
+    finalize: async () => { finalized = true; return { statusBar: "♡ must not appear" }; },
+    toolAware: true
+  })).text();
+  assert.match(output, /call_1/);
+  assert.match(output, /tool_calls/);
+  assert.doesNotMatch(output, /pulse_reaction|must not appear|confidence/);
+  assert.equal(finalized, false);
   assert.equal((output.match(/data: \[DONE\]/g) || []).length, 1);
 });

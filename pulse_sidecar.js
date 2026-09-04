@@ -8,6 +8,7 @@ const PULSE_PROTOCOL = `<pulse_protocol>
 <pulse_reaction>{"confidence":0到1,"emotion":null或{"label":"平静|开心|亲近|兴奋|惊喜|难过|紧张|生气|受惊","intensity":0到1},"senses":[{"channel":"touch|smell|taste|sound","kind":"允许值","intensity":0到1}]}</pulse_reaction>
 kind 允许值：touch=embrace|kiss|caress|contact|pain|water|texture|cold|warm|other；smell=clean|personal|floral|food|smoke|chemical|unpleasant|other；taste=sweet|spicy|bitter|sour|salty|other；sound=shout|whisper|music|weather|voice|noise|impact|other。
 只记录你在当前对话中实际感受到、或你在本次回复中确实做出的动作。否定、假设、引用、第三方经历和未执行的请求不算。结合最近上下文、说话方式和动作对象判断；没有变化时 emotion=null、senses=[]。不要在正常回复里解释或复述反应单。
+如果本轮需要调用工具，不要输出反应单或任何文字，先只调用工具；拿到工具结果后的最终文字回复再输出反应单。
 </pulse_protocol>`;
 
 function cleanContent(content) {
@@ -173,6 +174,14 @@ async function decorateJsonCompletion(text, { fallbackStatusBar = "", finalize }
   const choice = payload?.choices?.find(item => typeof item?.message?.content === "string");
   if (!choice) return JSON.stringify(payload);
   const extracted = extractPulseReaction(choice.message.content);
+  const isToolCall = choice.finish_reason === "tool_calls"
+    || (Array.isArray(choice.message?.tool_calls) && choice.message.tool_calls.length > 0);
+  if (isToolCall) {
+    // Kelivo needs a content-free intermediate assistant turn so it will execute
+    // the tool and request the final textual answer instead of stopping early.
+    choice.message.content = extracted.text || null;
+    return JSON.stringify(payload);
+  }
   let statusBar = fallbackStatusBar;
   try {
     const result = await finalize(extracted.reaction);
@@ -253,7 +262,7 @@ function jsonCompletionToSse(text, statusBar) {
   return `${chunks.map(chunk => `data: ${JSON.stringify(chunk)}`).join("\n\n")}${chunks.length ? "\n\n" : ""}data: [DONE]\n\n`;
 }
 
-function semanticPulseSseStream(body, { fallbackStatusBar = "", finalize }) {
+function semanticPulseSseStream(body, { fallbackStatusBar = "", finalize, toolAware = false }) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -266,11 +275,21 @@ function semanticPulseSseStream(body, { fallbackStatusBar = "", finalize }) {
       let resolved = false;
       let prefixed = false;
       let sawDone = false;
+      let hasToolCall = false;
 
       const emit = value => { if (value) controller.enqueue(encoder.encode(value)); };
       const resolvePending = async () => {
         if (resolved) return;
         const extracted = extractPulseReaction(pendingContent);
+        if (hasToolCall) {
+          // Do not add visible content or settle Pulse on an intermediate tool
+          // turn. The following request containing the tool result will do that.
+          emit(pendingLines.join(""));
+          pendingLines = [];
+          pendingContent = "";
+          resolved = true;
+          return;
+        }
         let statusBar = fallbackStatusBar;
         try {
           const result = await finalize(extracted.reaction);
@@ -308,6 +327,11 @@ function semanticPulseSseStream(body, { fallbackStatusBar = "", finalize }) {
           if (resolved) emit(`${line}\n`); else pendingLines.push(`${line}\n`);
           return;
         }
+        const toolCallChoice = payload.choices?.find(item =>
+          item?.finish_reason === "tool_calls"
+          || (Array.isArray(item?.delta?.tool_calls) && item.delta.tool_calls.length > 0)
+        );
+        if (toolCallChoice) hasToolCall = true;
         const choice = payload.choices?.find(item => typeof item?.delta?.content === "string");
         if (resolved) {
           if (choice && !prefixed && fallbackStatusBar) {
@@ -323,7 +347,8 @@ function semanticPulseSseStream(body, { fallbackStatusBar = "", finalize }) {
         const complete = /<\/pulse_reaction>/i.test(pendingContent);
         // 为保证隐藏元数据绝不泄漏，在拿到完整反应单前最多缓冲 8192 字符。
         // 不合规模型会在回复结束时走规则兜底，只是失去本轮流式首字速度。
-        if (complete || pendingContent.length > 8192) await resolvePending();
+        const alreadyHasVisibleText = complete && Boolean(extractPulseReaction(pendingContent).text);
+        if ((complete && (!toolAware || alreadyHasVisibleText)) || pendingContent.length > 8192) await resolvePending();
       };
 
       try {
