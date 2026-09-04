@@ -25,6 +25,17 @@ test("allows localhost to call internal write routes", () => {
   assert.equal(decide({ path: "/internal/heartbeat", ip: "::ffff:127.0.0.1" }).allow, true);
 });
 
+test("allows the public password-protected Pulse dashboard proxy", () => {
+  const access = decideRequestAccess({
+    path: "/pulse/api/state",
+    ip: "203.0.113.9",
+    isCloudRuntime: true,
+    allowPublicApi: true,
+    configuredKey: "gateway-key"
+  });
+  assert.equal(access.allow, true);
+});
+
 test("allows Render wake-up callbacks with the gateway key", () => {
   assert.equal(decide({ path: "/internal/wake-event", headerKey: "gateway-test-key" }).allow, true);
   assert.equal(decide({ path: "/internal/heartbeat", headerKey: "wrong" }).allow, false);
