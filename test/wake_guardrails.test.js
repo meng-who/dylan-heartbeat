@@ -45,6 +45,17 @@ test("allows the weekday calculated for the user's timezone", () => {
   );
 });
 
+test("rejects a generic calendar and longing template", () => {
+  assert.deepEqual(
+    findWakeOutputViolations("今天是9月4号，想你了，来找我。", {
+      diffMinutes: 180,
+      dayPeriod: "下午",
+      weekday: "星期五"
+    }),
+    ["generic_calendar_nudge"]
+  );
+});
+
 test("recognizes an escaped no-action marker at the end", () => {
   assert.deepEqual(
     parseNoActionDirective("刚推过一条了，不打扰你了[NO\\_ACTION]"),

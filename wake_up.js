@@ -6,6 +6,7 @@ const { dataPath, resolveDataPath } = require("./storage");
 const { parseChatCompletionResponse } = require("./upstream_response");
 const { getLatestUserActivity, parseUserActivityRecord } = require("./timeline_activity");
 const { findWakeOutputViolations, parseNoActionDirective } = require("./wake_guardrails");
+const { isSpecialEventContent } = require("./special_events");
 const {
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
@@ -272,7 +273,10 @@ function getWakeHistoryMessages(messages = []) {
       { min: 1 }
     )
   );
-  const list = Array.isArray(messages) ? messages : [];
+  const original = Array.isArray(messages) ? messages : [];
+  const list = original.filter(message => (
+    message?.role !== "assistant" || !isSpecialEventContent(normalizeContentToText(message.content))
+  ));
   const system = list.filter(msg => msg?.role === "system").slice(-1);
   const nonSystem = list.filter(msg => msg?.role !== "system").slice(-maxWakeMessages);
   const messageLimited = [...system, ...nonSystem];
@@ -282,7 +286,8 @@ function getWakeHistoryMessages(messages = []) {
     event: "wake_history_limit",
     configured_max_wake_messages: maxWakeMessages,
     configured_max_wake_text_chars: maxWakeTextChars,
-    before_total: list.length,
+    before_total: original.length,
+    conversation_total: list.length,
     after_total: textLimited.length,
     before_chars: summarizeWakeMessages(messageLimited).text_chars,
     after_chars: summarizeWakeMessages(textLimited).text_chars
@@ -586,7 +591,12 @@ async function runWakeUp() {
 
 最近记录：
 
-${historyText}`
+${historyText}
+
+请先阅读最末几轮真实聊天，再决定是否联系用户。
+- 若发送，必须自然承接其中一个具体话题、计划、情绪或细节，让用户能看出你记得刚聊过什么。
+- 禁止只报日期、星期或时段，再接“想你了”“来找我”“记得休息”等通用句式。
+- 没有值得承接的具体内容时，输出 [NO_ACTION]；不要为了发送而发送。`
     }
   ];
 

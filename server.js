@@ -5,6 +5,7 @@ const fs = require("fs-extra");
 const path = require("path");
 const { dataPath, resolveDataPath, writeJsonAtomicSync } = require("./storage");
 const { isSpecialEventContent } = require("./special_events");
+const { retainTimelineMessages } = require("./timeline_retention");
 const { decideRequestAccess } = require("./network_access");
 const { createUserActivityRecord, stampLatestUserActivity } = require("./timeline_activity");
 const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
@@ -270,11 +271,13 @@ function loadTimeline() {
 // 保存 timeline（保留 SP）
 // ========================
 function saveTimeline(messages) {
-  const sp = messages.find(m => m.role === "system");
-  const nonSP = messages.filter(m => m.role !== "system");
   const maxTimelineMessages = readPositiveIntegerEnv("MAX_TIMELINE_MESSAGES", 50);
-  const trimmed = nonSP.slice(-maxTimelineMessages);
-  const final = sp ? [sp, ...trimmed] : trimmed;
+  const maxSpecialEvents = Math.max(readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10), 20);
+  const final = retainTimelineMessages(messages, {
+    maxRealMessages: maxTimelineMessages,
+    maxSpecialEvents,
+    isSpecialEvent
+  });
   writeJsonAtomicSync(TIMELINE_FILE, final);
 }
 

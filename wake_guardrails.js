@@ -32,6 +32,10 @@ function findWakeOutputViolations(text, { diffMinutes, dayPeriod, weekday } = {}
     violations.push("wrong_local_weekday");
   }
 
+  const compact = value.replace(/\s+/g, "");
+  const genericCalendarNudge = /今天是(?:\d{1,2}月\d{1,2}[日号]|星期[一二三四五六日天]|周[一二三四五六日天]).{0,20}(?:想你|来找我)/;
+  if (genericCalendarNudge.test(compact)) violations.push("generic_calendar_nudge");
+
   return violations;
 }
 
