@@ -211,7 +211,7 @@ export function dashboardPage() {
     el('soloCooldownHours').value = Math.round(solo?.cooldownHours || 6);
     const latest = solo?.latest;
     el('soloLatest').textContent = latest?.at
-      ? new Date(latest.at).toLocaleString('zh-CN') + ' · ' + latest.mode + ' / ' + latest.chord + '\n' + latest.summary + '\n' + (latest.notified ? '他选择告诉了你' : latest.notifyWanted ? '他想告诉你，但推送没有成功' : '他选择把它留在心里')
+      ? new Date(latest.at).toLocaleString('zh-CN') + ' · ' + latest.mode + ' / ' + latest.chord + '\\n' + latest.summary + '\\n' + (latest.notified ? '他选择告诉了你' : latest.notifyWanted ? '他想告诉你，但推送没有成功' : '他选择把它留在心里')
       : '还没有独处记录';
   }
   async function refresh() {

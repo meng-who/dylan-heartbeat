@@ -9,9 +9,21 @@ const EMOTION_PROFILES = {
   "平静": { valence: 0.18, arousal: 0.12 },
   "开心": { valence: 0.75, arousal: 0.42 },
   "亲近": { valence: 0.82, arousal: 0.52 },
+  "安心": { valence: 0.62, arousal: 0.18 },
+  "温柔": { valence: 0.72, arousal: 0.3 },
+  "满足": { valence: 0.68, arousal: 0.22 },
+  "害羞": { valence: 0.48, arousal: 0.62 },
+  "期待": { valence: 0.64, arousal: 0.66 },
+  "思念": { valence: 0.28, arousal: 0.38 },
   "兴奋": { valence: 0.78, arousal: 0.82 },
   "惊喜": { valence: 0.84, arousal: 0.88 },
   "难过": { valence: -0.75, arousal: 0.32 },
+  "委屈": { valence: -0.58, arousal: 0.42 },
+  "失落": { valence: -0.55, arousal: 0.2 },
+  "孤独": { valence: -0.62, arousal: 0.26 },
+  "烦躁": { valence: -0.48, arousal: 0.72 },
+  "嫉妒": { valence: -0.42, arousal: 0.68 },
+  "疲惫": { valence: -0.22, arousal: 0.12 },
   "紧张": { valence: -0.35, arousal: 0.68 },
   "生气": { valence: -0.7, arousal: 0.86 },
   "受惊": { valence: -0.25, arousal: 0.95 },
@@ -46,14 +58,26 @@ const SEMANTIC_SENSE_LABELS = {
 
 const EMOTION_RULES = [
   { label: "受惊", immediate: /😱|😳/, pattern: /吓|突然/, valence: -0.25, arousal: 0.95 },
+  { label: "嫉妒", pattern: /嫉妒|吃醋|醋意/, valence: -0.42, arousal: 0.68 },
   { label: "生气", immediate: /😡|😤/, pattern: /生气|气死|烦死|讨厌|滚/, valence: -0.7, arousal: 0.86 },
+  { label: "烦躁", pattern: /烦躁|心烦|躁得|烦闷/, valence: -0.48, arousal: 0.72 },
   { label: "紧张", immediate: /🥺/, pattern: /紧张|害怕|担心|焦虑|不安|慌/, valence: -0.35, arousal: 0.68 },
   { label: "惊喜", immediate: /🎁|🎉/, pattern: /惊喜|又惊又喜|喜出望外|意外之喜/, valence: 0.84, arousal: 0.88 },
-  { label: "兴奋", immediate: /🤩|🥳|啊啊啊/, pattern: /激动|兴奋|好耶|太棒|期待/, valence: 0.78, arousal: 0.82 },
+  { label: "兴奋", immediate: /🤩|🥳|啊啊啊/, pattern: /激动|兴奋|好耶|太棒/, valence: 0.78, arousal: 0.82 },
+  { label: "期待", pattern: /期待|盼着|等不及|迫不及待/, valence: 0.64, arousal: 0.66 },
+  { label: "害羞", immediate: /🫣|☺️/, pattern: /害羞|脸红|不好意思|羞死/, valence: 0.48, arousal: 0.62 },
   { label: "亲近", immediate: /🥰|😘|❤️|❤/, pattern: /爱你|想你|抱抱|贴贴|亲亲|宝贝|老婆|老公/, valence: 0.82, arousal: 0.52 },
+  { label: "思念", pattern: /想念|惦记|牵挂|思念/, valence: 0.28, arousal: 0.38 },
+  { label: "温柔", pattern: /温柔|柔声|宠溺|心软/, valence: 0.72, arousal: 0.3 },
+  { label: "满足", pattern: /满足|知足|圆满|心满意足/, valence: 0.68, arousal: 0.22 },
+  { label: "安心", pattern: /安心|踏实|松了口气|放下心/, valence: 0.62, arousal: 0.18 },
   { label: "开心", immediate: /☺|😊|😄|嘿嘿|哈哈/, pattern: /开心|高兴|快乐|喜欢/, valence: 0.75, arousal: 0.42 },
+  { label: "委屈", pattern: /委屈|憋屈|被误会|冤枉/, valence: -0.58, arousal: 0.42 },
+  { label: "失落", pattern: /失落|落空|空落落|沮丧/, valence: -0.55, arousal: 0.2 },
+  { label: "孤独", pattern: /孤独|孤单|寂寞/, valence: -0.62, arousal: 0.26 },
+  { label: "疲惫", pattern: /疲惫|累坏|好累|困倦|没精神/, valence: -0.22, arousal: 0.12 },
   { label: "难过", immediate: /😭|😢|呜呜/, pattern: /难过|伤心|委屈|想哭|哭了/, valence: -0.75, arousal: 0.32 },
-  { label: "平静", pattern: /安心|放松|平静|没事了|晚安|睡吧/, valence: 0.32, arousal: 0.12 }
+  { label: "平静", pattern: /放松|平静|没事了|晚安|睡吧/, valence: 0.32, arousal: 0.12 }
 ];
 
 const SENSE_RULES = {
@@ -319,7 +343,7 @@ function hasUnnegatedMatch(text, pattern) {
 function detectEmotion(text) {
   const matches = EMOTION_RULES.filter(rule => rule.immediate?.test(text) || hasUnnegatedMatch(text, rule.pattern));
   const hasStartle = matches.some(rule => rule.label === "受惊");
-  const hasPositive = matches.some(rule => ["开心", "亲近", "兴奋", "惊喜"].includes(rule.label));
+  const hasPositive = matches.some(rule => ["开心", "亲近", "安心", "温柔", "满足", "害羞", "期待", "兴奋", "惊喜"].includes(rule.label));
   if (hasStartle && hasPositive) return { label: "惊喜", ...EMOTION_PROFILES["惊喜"] };
   return matches[0] || null;
 }
@@ -394,7 +418,7 @@ export function reactToText(input, text, nowMs = Date.now(), timeZone = "Asia/Sh
   events.push(...igniteSenses(state, cleanText));
   let emotion = detectEmotion(cleanText);
   const recentStartle = Boolean(state.startledAt && nowMs - state.startledAt <= 10_000);
-  if (emotion && recentStartle && ["开心", "亲近", "兴奋", "惊喜"].includes(emotion.label)) {
+  if (emotion && recentStartle && ["开心", "亲近", "安心", "温柔", "满足", "害羞", "期待", "兴奋", "惊喜"].includes(emotion.label)) {
     emotion = { label: "惊喜", ...EMOTION_PROFILES["惊喜"] };
   }
 
@@ -433,7 +457,7 @@ export function applySemanticReaction(input, reaction, nowMs = Date.now(), timeZ
 
   const requestedEmotionLabel = String(reaction.emotion?.label || "");
   const recentStartle = Boolean(state.startledAt && nowMs - state.startledAt <= 10_000);
-  const becomesPositive = ["开心", "亲近", "兴奋", "惊喜"].includes(requestedEmotionLabel);
+  const becomesPositive = ["开心", "亲近", "安心", "温柔", "满足", "害羞", "期待", "兴奋", "惊喜"].includes(requestedEmotionLabel);
   const emotionLabel = recentStartle && becomesPositive ? "惊喜" : requestedEmotionLabel;
   const emotionProfile = EMOTION_PROFILES[emotionLabel];
   if (emotionProfile) {

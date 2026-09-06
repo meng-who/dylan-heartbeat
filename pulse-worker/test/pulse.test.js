@@ -173,3 +173,20 @@ test("mixed sudden and positive language is recognized as surprise", () => {
   assert.equal(result.state.emotion.label, "惊喜");
   assert.ok(result.state.emotion.valence > 0);
 });
+
+test("recognizes a richer set of emotional undertones", () => {
+  const now = Date.UTC(2026, 8, 4, 12, 0, 0);
+  const cases = new Map([
+    ["终于能放下心，我很安心", "安心"],
+    ["被你看得有点害羞", "害羞"],
+    ["我一直很想念你", "思念"],
+    ["期待明天见到你", "期待"],
+    ["其实有一点吃醋", "嫉妒"],
+    ["事情落空了，有点失落", "失落"],
+    ["今天真的好累", "疲惫"]
+  ]);
+  for (const [text, expected] of cases) {
+    assert.equal(reactToText(createDefaultState(now), text, now).state.emotion.label, expected, text);
+  }
+  assert.notEqual(reactToText(createDefaultState(now), "我没有吃醋", now).state.emotion.label, "嫉妒");
+});

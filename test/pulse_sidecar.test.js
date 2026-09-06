@@ -85,6 +85,16 @@ test("accepts surprise as a validated semantic emotion", () => {
   assert.equal(result.text, "没想到是礼物。");
 });
 
+test("accepts richer validated semantic emotions", () => {
+  for (const label of ["安心", "温柔", "满足", "害羞", "期待", "思念", "委屈", "失落", "孤独", "烦躁", "嫉妒", "疲惫"]) {
+    const result = extractPulseReaction(
+      `<pulse_reaction>{"confidence":0.9,"emotion":{"label":"${label}","intensity":0.7},"senses":[]}</pulse_reaction>正常回复`
+    );
+    assert.equal(result.reaction.emotion.label, label);
+    assert.equal(result.text, "正常回复");
+  }
+});
+
 test("rejects invented reaction fields and strips malformed hidden output", () => {
   const invalid = extractPulseReaction(
     '<pulse_reaction>{"confidence":1,"emotion":null,"senses":[{"channel":"vision","kind":"secret","intensity":1}]}</pulse_reaction>正常回复'
