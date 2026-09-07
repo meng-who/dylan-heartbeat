@@ -20,6 +20,11 @@ const {
 } = require("./pulse_sidecar");
 const { createUserActivityRecord, stampLatestUserActivity } = require("./timeline_activity");
 const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
+const {
+  applyHttpResilience,
+  isToolFollowUp,
+  requestTraceId
+} = require("./http_resilience");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -33,6 +38,7 @@ const app = Fastify({
   logger: true,
   bodyLimit: readBodyLimitBytes()
 });
+const HTTP_TIMEOUTS = applyHttpResilience(app.server);
 
 app.register(require("@fastify/formbody"));
 
@@ -710,12 +716,28 @@ app.post("/pulse/api/solo/settings", (req, reply) => relayPulseDashboard(req, re
 // Chat Completions
 // ========================
 app.post("/v1/chat/completions", async (req, reply) => {
+  const requestId = requestTraceId(req.headers, req.id);
+  const toolFollowUp = isToolFollowUp(req.body);
+  const requestStartedAt = Date.now();
+  const upstreamAbort = new AbortController();
+  let activeResponseReader = null;
+  let requestStage = "received";
+  const handleClientDisconnect = () => {
+    if (reply.raw.writableEnded) return;
+    upstreamAbort.abort(new Error("Kelivo connection closed"));
+    if (activeResponseReader) {
+      Promise.resolve(activeResponseReader.cancel("Kelivo connection closed")).catch(() => {});
+    }
+  };
+  reply.raw.once("close", handleClientDisconnect);
   try {
     const body = req.body;
     // 批注 2026-07-15：公开部署时日志不能默认写入完整上下文；
     // 这里只保留请求摘要，避免 system prompt、记忆和聊天正文进入 pm2 日志。
     console.log(JSON.stringify({
       event: "kelivo_request",
+      request_id: requestId,
+      tool_followup: toolFollowUp,
       model: body?.model || "",
       stream: body?.stream === true,
       messages: summarizeMessagesForLog(body?.messages || []),
@@ -765,6 +787,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
     console.log("本次注入的特殊事件数量:", readBooleanEnv("INJECT_WAKE_EVENTS", true) ? Math.min(oldEvents.length, readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10)) : 0);
     addAutomationEventContext(llmMessages, oldEvents);
 
+    requestStage = "pulse_prepare";
     let pulseContext = null;
     const semanticPulseEnabled = readBooleanEnv("PULSE_SEMANTIC_ENABLED", true);
     const latestUser = [...kelivoMessages].reverse().find(message => message?.role === "user");
@@ -884,14 +907,28 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     const primaryModel = String(body?.model || "").trim();
     const backupModel = String(process.env.BACKUP_MODEL_NAME || "").trim();
+    requestStage = "upstream_waiting_headers";
+    console.log(JSON.stringify({
+      event: "llm_upstream_start",
+      request_id: requestId,
+      tool_followup: toolFollowUp
+    }));
     let response = await fetch(TARGET_API_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.TARGET_API_KEY}`
       },
-      body: JSON.stringify({ ...body, messages: llmMessages })
+      body: JSON.stringify({ ...body, messages: llmMessages }),
+      signal: upstreamAbort.signal
     });
+    console.log(JSON.stringify({
+      event: "llm_upstream_headers",
+      request_id: requestId,
+      tool_followup: toolFollowUp,
+      status: response.status,
+      elapsed_ms: Date.now() - requestStartedAt
+    }));
 
     if (!response.ok) {
       const primaryErrorText = await response.text();
@@ -909,13 +946,15 @@ app.post("/v1/chat/completions", async (req, reply) => {
           to: backupModel,
           primary_status: response.status
         }));
+        requestStage = "backup_waiting_headers";
         response = await fetch(TARGET_API_URL, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
             Authorization: `Bearer ${process.env.TARGET_API_KEY}`
           },
-          body: JSON.stringify({ ...body, model: backupModel, messages: llmMessages })
+          body: JSON.stringify({ ...body, model: backupModel, messages: llmMessages }),
+          signal: upstreamAbort.signal
         });
       } else {
         return reply
@@ -972,10 +1011,12 @@ app.post("/v1/chat/completions", async (req, reply) => {
       return;
     }
 
+    requestStage = "streaming_response";
     reply.raw.writeHead(response.status, {
       "Content-Type": "text/event-stream; charset=utf-8",
       "Cache-Control": "no-cache",
-      Connection: "keep-alive"
+      Connection: "keep-alive",
+      "Keep-Alive": `timeout=${Math.floor(HTTP_TIMEOUTS.keepAliveTimeout / 1000)}`
     });
 
     const decoratedBody = pulseContext
@@ -986,15 +1027,35 @@ app.post("/v1/chat/completions", async (req, reply) => {
         })
       : response.body;
     const reader = decoratedBody.getReader();
+    activeResponseReader = reader;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (reply.raw.destroyed) {
+        await reader.cancel("Kelivo connection closed").catch(() => {});
+        return;
+      }
       reply.raw.write(value);
     }
     reply.raw.end();
   } catch (err) {
-    console.error(err);
-    reply.code(500).send({ error: err.message });
+    const clientDisconnected = upstreamAbort.signal.aborted || reply.raw.destroyed;
+    console.error(JSON.stringify({
+      event: "kelivo_request_failed",
+      request_id: requestId,
+      tool_followup: toolFollowUp,
+      stage: requestStage,
+      client_disconnected: clientDisconnected,
+      elapsed_ms: Date.now() - requestStartedAt,
+      error: String(err?.message || err)
+    }));
+    if (reply.raw.headersSent || reply.sent || clientDisconnected) {
+      if (!reply.raw.writableEnded && !reply.raw.destroyed) reply.raw.end();
+      return;
+    }
+    return reply.code(502).send({ error: "上游连接暂时中断", request_id: requestId });
+  } finally {
+    reply.raw.off("close", handleClientDisconnect);
   }
 });
 
