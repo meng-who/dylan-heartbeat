@@ -84,10 +84,7 @@ export function injectPrivateState(messages = [], state) {
 }
 
 export function visibleStatusBar(state) {
-  const latest = state.solo?.latest;
-  const ageMs = latest?.at ? Math.max(0, Date.now() - latest.at) : Infinity;
-  const soloBadge = ageMs <= 24 * 60 * 60 * 1000 ? ` · 贤者时间：${latest.mode}` : "";
-  return `♡ ${Math.round(state.heartRate)} bpm · ${Number(state.temperature).toFixed(1)}°C · ${breathingLabel(state.breathingRate)} · 情绪：${state.emotion.label} · ${dominantSensation(state)}${soloBadge}`;
+  return `♡ ${Math.round(state.heartRate)} bpm · ${Number(state.temperature).toFixed(1)}°C · ${breathingLabel(state.breathingRate)} · 情绪：${state.emotion.label} · ${dominantSensation(state)}`;
 }
 
 export function stripStatusLine(text) {

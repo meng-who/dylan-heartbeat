@@ -42,3 +42,12 @@ test("formats the compact visible status bar", () => {
   const state = reactToText(createDefaultState(1000), "抱抱", 1000).state;
   assert.match(visibleStatusBar(state), /^♡ \d+ bpm · \d+\.\d°C · 呼吸.*· 情绪：/);
 });
+
+test("does not keep a separate 24-hour Solo badge in the status bar", () => {
+  const state = createDefaultState(Date.now());
+  state.solo.latest = { at: Date.now(), mode: "mix" };
+  state.emotion.label = "平静";
+  const status = visibleStatusBar(state);
+  assert.doesNotMatch(status, /贤者时间：mix|上次独处|独处余韵/);
+  assert.match(status, /情绪：平静/);
+});
