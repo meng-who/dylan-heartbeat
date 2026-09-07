@@ -97,6 +97,7 @@ export function dashboardPage() {
     .bpm { margin-top: 12px; font-size: 40px; font-weight: 760; letter-spacing: -.04em; }
     .bpm span { color: #ad939f; font-size: 15px; letter-spacing: .08em; }
     .sensation { margin-top: 7px; color: #e6b8c9; }
+    .current-bar { margin-top: 13px; color: #bda7b2; font-size: 12px; }
     .metrics { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-top: 14px; }
     .card { padding: 21px; border: 1px solid #ffffff12; border-radius: 22px; background: #211820cf; }
     .label { color: #aa929e; font-size: 13px; }
@@ -108,6 +109,7 @@ export function dashboardPage() {
     .fill { height: 100%; width: 0; border-radius: inherit; background: linear-gradient(90deg, #bf6989, #f3a6c0); transition: width .5s ease; }
     .pct { color: #a9919d; text-align: right; font-variant-numeric: tabular-nums; }
     .events { display: grid; gap: 12px; }
+    .section-note { margin: -5px 0 14px; color: #8e7983; font-size: 12px; line-height: 1.5; }
     .event { padding: 16px 18px; border: 1px solid #ffffff10; border-radius: 18px; background: linear-gradient(135deg, #2a1d27b8, #191218b8); }
     .event-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
     .event-kind { display: inline-flex; align-items: center; gap: 7px; color: #f0b6cb; font-size: 13px; font-weight: 700; }
@@ -136,6 +138,7 @@ export function dashboardPage() {
       <div class="heart">♡</div>
       <div class="bpm"><b id="heartRate">--</b> <span>BPM</span></div>
       <div class="sensation" id="sensation">正在读取身体状态</div>
+      <div class="current-bar" id="currentBar">正在同步聊天状态条</div>
     </div>
   </div>
   <div class="metrics">
@@ -161,13 +164,13 @@ export function dashboardPage() {
     <button class="solo-save" id="soloSave" type="button">保存 Solo 设置</button><span class="save-note" id="soloSaveNote"></span>
   </section>
   <section class="card"><h2>感官残留</h2><div id="senses"></div></section>
-  <section><h2>最近的身体事件</h2><div class="events" id="events"><div class="empty">还没有事件</div></div></section>
+  <section><h2>最近的身体事件</h2><p class="section-note">这里只记录真正发生的情绪或感官变化；卡片下方是事件发生当时的身体数据。</p><div class="events" id="events"><div class="empty">还没有事件</div></div></section>
 </main>
 <script>
   const senseNames = { touch: '触觉', smell: '嗅觉', taste: '味觉', sound: '听觉' };
   const eventMeta = {
     touch: ['触觉', '✦'], smell: ['嗅觉', '◌'], taste: ['味觉', '◇'],
-    sound: ['听觉', '♪'], emotion: ['情绪', '◐'], heartbeat: ['身体节律', '♡'], solo: ['独处', '◒']
+    sound: ['听觉', '♪'], emotion: ['情绪', '◐'], solo: ['独处', '◒']
   };
   function el(id) { return document.getElementById(id); }
   function renderSense(name, sense) {
@@ -176,7 +179,6 @@ export function dashboardPage() {
   }
   function eventCopy(event) {
     const summary = String(event.summary || '身体状态发生了变化');
-    if (summary === '身体状态随时间自然更新') return '身体维持着自然的呼吸与心跳节律';
     const oldEmotion = summary.match(/^情绪转为(.+)$/);
     if (oldEmotion) return '情绪底色转为「' + oldEmotion[1] + '」';
     if (!summary.includes('：') && senseNames[event.event_type]) {
@@ -189,7 +191,7 @@ export function dashboardPage() {
     const meta = eventMeta[event.event_type] || ['身体变化', '·'];
     const snapshot = event.snapshot;
     const vitals = snapshot
-      ? '♡ ' + Math.round(snapshot.heartRate) + ' bpm · ' + Number(snapshot.temperature).toFixed(1) + '°C · ' + (snapshot.emotion?.label || '平静')
+      ? '当时：♡ ' + Math.round(snapshot.heartRate) + ' bpm · ' + Number(snapshot.temperature).toFixed(1) + '°C · ' + (snapshot.emotion?.label || '平静')
       : '';
     return '<article class="event"><div class="event-head"><span class="event-kind"><i>' + meta[1] + '</i>' + meta[0] + '</span><time>' + new Date(event.created_at).toLocaleString('zh-CN') + '</time></div><div class="event-copy">' + escapeHtml(eventCopy(event)) + '</div>' + (vitals ? '<div class="event-vitals">' + escapeHtml(vitals) + '</div>' : '') + '</article>';
   }
@@ -225,6 +227,7 @@ export function dashboardPage() {
     el('breathingLabel').textContent = s.breathingLabel;
     el('emotion').textContent = s.emotion.label;
     el('sensation').textContent = s.dominantSensation;
+    el('currentBar').textContent = data.statusBar || '';
     renderSolo(s.solo);
     el('updated').textContent = '更新于 ' + new Date(s.updatedAt).toLocaleTimeString('zh-CN');
     document.documentElement.style.setProperty('--beat', Math.max(.35, 60 / s.heartRate).toFixed(2) + 's');

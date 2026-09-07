@@ -266,7 +266,7 @@ async function handleStateApi(request, env) {
   const stored = await loadState(env.DB, profileId(env), now);
   const current = decayState(stored, now, env.TIME_ZONE || "Asia/Shanghai");
   const events = await listEvents(env.DB, profileId(env), 30);
-  return json({ state: publicSnapshot(current), events });
+  return json({ state: publicSnapshot(current), statusBar: visibleStatusBar(current), events });
 }
 
 async function handleReactApi(request, env) {

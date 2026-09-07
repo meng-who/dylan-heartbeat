@@ -17,6 +17,8 @@ export async function loadState(db, profileId, nowMs = Date.now()) {
 export async function saveState(db, profileId, state, events = []) {
   if (!db) return;
   const snapshot = JSON.stringify(state);
+  // Quiet chats advance the live state, but should not bury meaningful events.
+  const meaningfulEvents = events.filter(event => event?.type !== "heartbeat");
   const statements = [
     db.prepare(`
       INSERT INTO pulse_state(profile_id, state_json, updated_at)
@@ -27,7 +29,7 @@ export async function saveState(db, profileId, state, events = []) {
     `).bind(profileId, snapshot, state.updatedAt)
   ];
 
-  for (const event of events.slice(0, 4)) {
+  for (const event of meaningfulEvents.slice(0, 4)) {
     statements.push(
       db.prepare(`
         INSERT INTO pulse_events(profile_id, created_at, event_type, summary, snapshot_json)
@@ -43,6 +45,10 @@ export async function saveState(db, profileId, state, events = []) {
   }
 
   await db.batch(statements);
+  await db.prepare(`
+    DELETE FROM pulse_events
+    WHERE profile_id = ?1 AND event_type = 'heartbeat'
+  `).bind(profileId).run();
   await db.prepare(`
     DELETE FROM pulse_events
     WHERE profile_id = ?1
@@ -62,10 +68,11 @@ export async function listEvents(db, profileId, limit = 30) {
     SELECT created_at, event_type, summary, snapshot_json
     FROM pulse_events
     WHERE profile_id = ?1
+      AND event_type != 'heartbeat'
     ORDER BY created_at DESC, id DESC
     LIMIT ?2
   `).bind(profileId, safeLimit).all();
-  return (result.results || []).map(row => {
+  return (result.results || []).filter(row => row.event_type !== "heartbeat").map(row => {
     let snapshot = null;
     try {
       snapshot = JSON.parse(row.snapshot_json || "null");

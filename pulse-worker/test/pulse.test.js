@@ -3,6 +3,12 @@ import assert from "node:assert/strict";
 
 import { applySemanticReaction, createDefaultState, decayState, reactToText } from "../src/pulse.js";
 
+test("quiet text advances live state without creating a fake body event", () => {
+  const now = Date.UTC(2026, 8, 7, 0, 0, 0);
+  const { events } = reactToText(createDefaultState(now), "嗯，我知道了", now + 1_000);
+  assert.deepEqual(events, []);
+});
+
 test("an embrace raises touch and heart rate", () => {
   const now = Date.UTC(2026, 8, 2, 6, 0, 0);
   const before = createDefaultState(now);
