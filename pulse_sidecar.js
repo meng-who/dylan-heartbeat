@@ -2,6 +2,7 @@ const PULSE_BLOCK = /\n?<pulse_state>[\s\S]*?<\/pulse_state>\n?/gi;
 const PULSE_PROTOCOL_BLOCK = /\n?<pulse_protocol>[\s\S]*?<\/pulse_protocol>\n?/gi;
 const PULSE_REACTION_BLOCK = /<pulse_reaction>\s*([\s\S]*?)\s*<\/pulse_reaction>/i;
 const STATUS_LINE = /^\s*(?:>\s*)?♡\s*\d{2,3}\s*bpm\s*·[^\n]*(?:\r?\n){1,2}/u;
+const DEFAULT_STREAM_FINALIZE_WAIT_MS = 750;
 
 const PULSE_PROTOCOL = `<pulse_protocol>
 在每次回复最开头，先输出且只输出一个隐藏身体反应单，紧接着再正常回复：
@@ -162,6 +163,30 @@ function extractPulseReaction(text) {
   return { reaction, text: input.replace(fencedBlock, "").replace(PULSE_REACTION_BLOCK, "").trimStart() };
 }
 
+function couldStartWithPulseReaction(text) {
+  const value = String(text || "").trimStart().toLowerCase();
+  const opening = "<pulse_reaction>";
+  if (!value) return true;
+  if (opening.startsWith(value) || value.startsWith(opening)) return true;
+  if ("```".startsWith(value)) return true;
+  if (!value.startsWith("```")) return false;
+
+  const afterFence = value.slice(3).replace(/^(?:json|xml)?\s*/i, "");
+  return !afterFence || opening.startsWith(afterFence) || afterFence.startsWith(opening);
+}
+
+async function settleWithin(promise, waitMs) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise(resolve => { timer = setTimeout(() => resolve(null), waitMs); })
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function prefixJsonText(text, statusBar) {
   const payload = JSON.parse(text);
   const choice = payload?.choices?.find(item => typeof item?.message?.content === "string");
@@ -262,7 +287,12 @@ function jsonCompletionToSse(text, statusBar) {
   return `${chunks.map(chunk => `data: ${JSON.stringify(chunk)}`).join("\n\n")}${chunks.length ? "\n\n" : ""}data: [DONE]\n\n`;
 }
 
-function semanticPulseSseStream(body, { fallbackStatusBar = "", finalize, toolAware = false }) {
+function semanticPulseSseStream(body, {
+  fallbackStatusBar = "",
+  finalize,
+  toolAware = false,
+  finalizeWaitMs = DEFAULT_STREAM_FINALIZE_WAIT_MS
+}) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   const encoder = new TextEncoder();
@@ -291,10 +321,13 @@ function semanticPulseSseStream(body, { fallbackStatusBar = "", finalize, toolAw
           return;
         }
         let statusBar = fallbackStatusBar;
-        try {
-          const result = await finalize(extracted.reaction);
+        const finalization = Promise.resolve()
+          .then(() => finalize(extracted.reaction))
+          .catch(() => null);
+        if (extracted.reaction) {
+          const result = await settleWithin(finalization, finalizeWaitMs);
           if (result?.statusBar) statusBar = result.statusBar;
-        } catch {}
+        }
         emit(pendingLines.join(""));
         const visible = extracted.text;
         const content = `${statusBar}${statusBar && visible ? "\n\n" : ""}${visible}`;
@@ -345,10 +378,13 @@ function semanticPulseSseStream(body, { fallbackStatusBar = "", finalize, toolAw
         template ||= payload;
         pendingContent += choice.delta.content;
         const complete = /<\/pulse_reaction>/i.test(pendingContent);
+        const plainText = !complete && !couldStartWithPulseReaction(pendingContent);
         // 为保证隐藏元数据绝不泄漏，在拿到完整反应单前最多缓冲 8192 字符。
-        // 不合规模型会在回复结束时走规则兜底，只是失去本轮流式首字速度。
+        // 普通文本会立即放行；只有确实以反应单开头时才等待闭合标签。
         const alreadyHasVisibleText = complete && Boolean(extractPulseReaction(pendingContent).text);
-        if ((complete && (!toolAware || alreadyHasVisibleText)) || pendingContent.length > 8192) await resolvePending();
+        if (plainText || (complete && (!toolAware || alreadyHasVisibleText)) || pendingContent.length > 8192) {
+          await resolvePending();
+        }
       };
 
       try {
@@ -372,6 +408,7 @@ function semanticPulseSseStream(body, { fallbackStatusBar = "", finalize, toolAw
 
 module.exports = {
   cleanPulseArtifacts,
+  couldStartWithPulseReaction,
   decorateJsonCompletion,
   extractPulseReaction,
   fetchPulsePreparation,

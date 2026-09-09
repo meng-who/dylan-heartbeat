@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   cleanPulseArtifacts,
+  couldStartWithPulseReaction,
   decorateJsonCompletion,
   extractPulseReaction,
   fetchPulsePreparation,
@@ -14,6 +15,12 @@ const {
   prefixSseStream,
   semanticPulseSseStream
 } = require("../pulse_sidecar");
+
+test("distinguishes a split Pulse prefix from ordinary text", () => {
+  assert.equal(couldStartWithPulseReaction("<pulse_re"), true);
+  assert.equal(couldStartWithPulseReaction("```json\n<pulse_re"), true);
+  assert.equal(couldStartWithPulseReaction("工具结果出来了。"), false);
+});
 
 test("cleans old visible and private Pulse state", () => {
   const messages = cleanPulseArtifacts([
@@ -217,4 +224,56 @@ test("passes an SSE tool call through without status text or Pulse settlement", 
   assert.doesNotMatch(output, /pulse_reaction|must not appear|confidence/);
   assert.equal(finalized, false);
   assert.equal((output.match(/data: \[DONE\]/g) || []).length, 1);
+});
+
+test("streams a plain tool follow-up without waiting for upstream completion", async () => {
+  const encoder = new TextEncoder();
+  let sourceController;
+  const source = new ReadableStream({
+    start(controller) { sourceController = controller; }
+  });
+  const output = semanticPulseSseStream(source, {
+    fallbackStatusBar: "♡ 78 bpm",
+    finalize: () => new Promise(() => {}),
+    toolAware: true,
+    finalizeWaitMs: 10
+  });
+  const reader = output.getReader();
+
+  sourceController.enqueue(encoder.encode(
+    `data: ${JSON.stringify({ choices: [{ delta: { role: "assistant", content: "查到了，结果是正常的。" } }] })}\n\n`
+  ));
+
+  const first = await Promise.race([
+    reader.read(),
+    new Promise((_, reject) => setTimeout(() => reject(new Error("plain follow-up was buffered")), 100))
+  ]);
+  const text = new TextDecoder().decode(first.value);
+  assert.match(text, /查到了，结果是正常的/);
+  assert.match(text, /♡ 78 bpm/);
+
+  sourceController.enqueue(encoder.encode("data: [DONE]\n\n"));
+  sourceController.close();
+  await reader.cancel();
+});
+
+test("caps the wait for a slow semantic Pulse finalization", async () => {
+  const encoder = new TextEncoder();
+  const hidden = '<pulse_reaction>{"confidence":0.9,"emotion":null,"senses":[]}</pulse_reaction>完成了。';
+  const source = new ReadableStream({ start(controller) {
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: hidden } }] })}\n\n`));
+    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    controller.close();
+  }});
+  const startedAt = Date.now();
+  const output = await new Response(semanticPulseSseStream(source, {
+    fallbackStatusBar: "♡ fallback",
+    finalize: () => new Promise(() => {}),
+    finalizeWaitMs: 10
+  })).text();
+
+  assert.ok(Date.now() - startedAt < 200);
+  assert.match(output, /完成了/);
+  assert.match(output, /♡ fallback/);
+  assert.doesNotMatch(output, /pulse_reaction/);
 });
