@@ -19,6 +19,9 @@ const {
 test("distinguishes a split Pulse prefix from ordinary text", () => {
   assert.equal(couldStartWithPulseReaction("<pulse_re"), true);
   assert.equal(couldStartWithPulseReaction("```json\n<pulse_re"), true);
+  assert.equal(couldStartWithPulseReaction("\\<pulse\\_re"), true);
+  assert.equal(couldStartWithPulseReaction("```json\n\\<pulse\\_re"), true);
+  assert.equal(couldStartWithPulseReaction("&lt;pulse_re"), true);
   assert.equal(couldStartWithPulseReaction("工具结果出来了。"), false);
 });
 
@@ -121,6 +124,30 @@ test("strips a valid hidden reaction even when the model wraps it in a code fenc
   assert.equal(result.text, "正常回复");
 });
 
+test("accepts Markdown-escaped reaction tags without exposing private JSON", () => {
+  const result = extractPulseReaction(
+    '\\<pulse\\_reaction>{"confidence":0.91,"emotion":{"label":"安心","intensity":0.7},"senses":[]}\\<\/pulse\\_reaction>\n我在。'
+  );
+  assert.equal(result.reaction.emotion.label, "安心");
+  assert.equal(result.text, "我在。");
+  assert.doesNotMatch(result.text, /pulse\\?_reaction|confidence/);
+});
+
+test("accepts HTML-escaped reaction tags without exposing private JSON", () => {
+  const result = extractPulseReaction(
+    '&lt;pulse_reaction&gt;{"confidence":0.82,"emotion":null,"senses":[]}&lt;/pulse_reaction&gt;\n正常回复'
+  );
+  assert.equal(result.reaction.confidence, 0.82);
+  assert.equal(result.text, "正常回复");
+  assert.doesNotMatch(result.text, /pulse_reaction|confidence/);
+});
+
+test("fails closed for an incomplete escaped reaction tag", () => {
+  const result = extractPulseReaction('\\<pulse\\_reaction>{"confidence":0.8');
+  assert.equal(result.reaction, null);
+  assert.equal(result.text, "");
+});
+
 test("prepares and finalizes Pulse through separate safe endpoints", async () => {
   const calls = [];
   const fetchImpl = async (url, init) => {
@@ -198,6 +225,24 @@ test("buffers a split semantic SSE header, applies it, and never leaks it", asyn
   assert.match(output, /别喊/);
   assert.doesNotMatch(output, /pulse_reaction|confidence/);
   assert.equal((output.match(/data: \[DONE\]/g) || []).length, 1);
+});
+
+test("buffers and strips an escaped semantic SSE header", async () => {
+  const encoder = new TextEncoder();
+  const hidden = '\\<pulse\\_reaction>{"confidence":0.9,"emotion":null,"senses":[]}\\<\/pulse\\_reaction>回来啦。';
+  const source = new ReadableStream({ start(controller) {
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: hidden.slice(0, 11) } }] })}\n\n`));
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: hidden.slice(11) } }] })}\n\n`));
+    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    controller.close();
+  }});
+  const output = await new Response(semanticPulseSseStream(source, {
+    fallbackStatusBar: "♡ old",
+    finalize: async reaction => ({ statusBar: reaction ? "♡ new" : "♡ fallback" })
+  })).text();
+  assert.match(output, /♡ new/);
+  assert.match(output, /回来啦/);
+  assert.doesNotMatch(output, /pulse\\?_reaction|confidence/);
 });
 
 test("passes an SSE tool call through without status text or Pulse settlement", async () => {

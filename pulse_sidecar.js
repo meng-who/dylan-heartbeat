@@ -1,6 +1,22 @@
 const PULSE_BLOCK = /\n?<pulse_state>[\s\S]*?<\/pulse_state>\n?/gi;
 const PULSE_PROTOCOL_BLOCK = /\n?<pulse_protocol>[\s\S]*?<\/pulse_protocol>\n?/gi;
-const PULSE_REACTION_BLOCK = /<pulse_reaction>\s*([\s\S]*?)\s*<\/pulse_reaction>/i;
+// Models sometimes Markdown-escape this private tag (`\<pulse\_reaction>`)
+// or encode its brackets as HTML. Parse every known form and fail closed so
+// the private reaction JSON can never become visible chat text.
+const PULSE_REACTION_NAME = String.raw`pulse(?:\\)?_reaction`;
+const PULSE_REACTION_LT = String.raw`(?:\\?<|&lt;)`;
+const PULSE_REACTION_GT = String.raw`(?:\\?>|&gt;)`;
+const PULSE_REACTION_OPEN_SOURCE = `${PULSE_REACTION_LT}\\s*${PULSE_REACTION_NAME}\\s*${PULSE_REACTION_GT}`;
+const PULSE_REACTION_CLOSE_SOURCE = `${PULSE_REACTION_LT}\\s*\/\\s*${PULSE_REACTION_NAME}\\s*${PULSE_REACTION_GT}`;
+const PULSE_REACTION_BLOCK = new RegExp(`${PULSE_REACTION_OPEN_SOURCE}\\s*([\\s\\S]*?)\\s*${PULSE_REACTION_CLOSE_SOURCE}`, "i");
+const PULSE_REACTION_BLOCK_GLOBAL = new RegExp(PULSE_REACTION_BLOCK.source, "gi");
+const PULSE_REACTION_START = new RegExp(`${PULSE_REACTION_OPEN_SOURCE}[\\s\\S]*$`, "i");
+const PULSE_REACTION_CLOSE = new RegExp(PULSE_REACTION_CLOSE_SOURCE, "i");
+const PULSE_REACTION_OPENINGS = [
+  "<pulse_reaction>", "<pulse_reaction\\>", "<pulse\\_reaction>", "<pulse\\_reaction\\>",
+  "\\<pulse_reaction>", "\\<pulse_reaction\\>", "\\<pulse\\_reaction>", "\\<pulse\\_reaction\\>",
+  "&lt;pulse_reaction&gt;", "&lt;pulse\\_reaction&gt;"
+];
 const STATUS_LINE = /^\s*(?:>\s*)?♡\s*\d{2,3}\s*bpm\s*·[^\n]*(?:\r?\n){1,2}/u;
 const DEFAULT_STREAM_FINALIZE_WAIT_MS = 750;
 
@@ -156,23 +172,29 @@ function normalizeSemanticReaction(value) {
 function extractPulseReaction(text) {
   const input = String(text || "");
   const match = input.match(PULSE_REACTION_BLOCK);
-  if (!match) return { reaction: null, text: input.replace(/<pulse_reaction>[\s\S]*$/i, "").trimStart() };
   let reaction = null;
-  try { reaction = normalizeSemanticReaction(JSON.parse(match[1])); } catch {}
+  if (match) {
+    try { reaction = normalizeSemanticReaction(JSON.parse(match[1])); } catch {}
+  }
   const fencedBlock = new RegExp("(?:" + "```" + ")(?:json|xml)?\\s*" + PULSE_REACTION_BLOCK.source + "\\s*(?:" + "```" + ")", "i");
-  return { reaction, text: input.replace(fencedBlock, "").replace(PULSE_REACTION_BLOCK, "").trimStart() };
+  const visible = input
+    .replace(fencedBlock, "")
+    .replace(PULSE_REACTION_BLOCK_GLOBAL, "")
+    .replace(PULSE_REACTION_START, "")
+    .replace(new RegExp(PULSE_REACTION_CLOSE_SOURCE, "gi"), "")
+    .trimStart();
+  return { reaction, text: visible };
 }
 
 function couldStartWithPulseReaction(text) {
   const value = String(text || "").trimStart().toLowerCase();
-  const opening = "<pulse_reaction>";
   if (!value) return true;
-  if (opening.startsWith(value) || value.startsWith(opening)) return true;
+  if (PULSE_REACTION_OPENINGS.some(opening => opening.startsWith(value) || value.startsWith(opening))) return true;
   if ("```".startsWith(value)) return true;
   if (!value.startsWith("```")) return false;
 
   const afterFence = value.slice(3).replace(/^(?:json|xml)?\s*/i, "");
-  return !afterFence || opening.startsWith(afterFence) || afterFence.startsWith(opening);
+  return !afterFence || PULSE_REACTION_OPENINGS.some(opening => opening.startsWith(afterFence) || afterFence.startsWith(opening));
 }
 
 async function settleWithin(promise, waitMs) {
@@ -377,7 +399,7 @@ function semanticPulseSseStream(body, {
         if (!choice) { pendingLines.push(`${line}\n`); return; }
         template ||= payload;
         pendingContent += choice.delta.content;
-        const complete = /<\/pulse_reaction>/i.test(pendingContent);
+        const complete = PULSE_REACTION_CLOSE.test(pendingContent);
         const plainText = !complete && !couldStartWithPulseReaction(pendingContent);
         // 为保证隐藏元数据绝不泄漏，在拿到完整反应单前最多缓冲 8192 字符。
         // 普通文本会立即放行；只有确实以反应单开头时才等待闭合标签。
