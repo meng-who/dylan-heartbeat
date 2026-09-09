@@ -7,6 +7,7 @@ const { parseChatCompletionResponse } = require("./upstream_response");
 const { getLatestUserActivity, parseUserActivityRecord } = require("./timeline_activity");
 const { findWakeOutputViolations, parseNoActionDirective } = require("./wake_guardrails");
 const { isSpecialEventContent } = require("./special_events");
+const { findSimilarRecentPush, getRecentSentPushes } = require("./wake_dedup");
 const { runSoloCycle } = require("./solo_runtime");
 const {
   formatDateTimeInTimeZone,
@@ -549,6 +550,7 @@ async function runWakeUp() {
   const weatherContext = await fetchWeatherContext();
   const wakePrompt = buildWakePrompt(getChinaTimeString(), diffMinutes, weatherContext);
   const cleanMessages = stripPosition(getWakeHistoryMessages(messages));
+  const recentSentPushes = getRecentSentPushes(messages, 5);
 
   const historyText = cleanMessages
     .filter(msg => msg.role !== "system")
@@ -594,9 +596,15 @@ async function runWakeUp() {
 
 ${historyText}
 
+最近已发送的主动推送（只用于查重，不是用户说的话）：
+${recentSentPushes.length
+  ? recentSentPushes.map((push, index) => `${index + 1}. ${push.title}${push.title && push.body ? "｜" : ""}${push.body}`).join("\n")
+  : "（暂无）"}
+
 请先阅读最末几轮真实聊天，再决定是否联系用户。
 - 若发送，必须自然承接其中一个具体话题、计划、情绪或细节，让用户能看出你记得刚聊过什么。
 - 禁止只报日期、星期或时段，再接“想你了”“来找我”“记得休息”等通用句式。
+- 请在输出前自行比较上面的近期推送；主题、意图或含义相近时必须输出 [NO_ACTION]，不要只换一种说法重发。
 - 没有值得承接的具体内容时，输出 [NO_ACTION]；不要为了发送而发送。`
     }
   ];
@@ -778,12 +786,28 @@ ${historyText}
       let safeTitle = title || "来自伴侣";
       if (/^\d/.test(safeTitle)) safeTitle = "来自伴侣｜" + safeTitle;
 
-      const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
-      if (!pushResult.ok) {
-        console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
-        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
-      } else {
-        eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
+      const duplicate = findSimilarRecentPush(
+        { title: safeTitle, body: safeBody },
+        recentSentPushes
+      );
+      if (duplicate.matched) {
+        console.warn(JSON.stringify({
+          event: "wake_duplicate_rejected",
+          reason: duplicate.reason,
+          similarity: Number(duplicate.similarity.toFixed(3)),
+          compared_pushes: recentSentPushes.length
+        }));
+        eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：与近期推送含义重复）`;
+      }
+
+      if (!eventContent) {
+        const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
+        if (!pushResult.ok) {
+          console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
+          eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
+        } else {
+          eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
+        }
       }
     }
   }
