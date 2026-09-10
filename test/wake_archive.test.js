@@ -36,12 +36,22 @@ test("appends, searches, filters and deletes encrypted records", () => {
   try {
     appendWakeArchive({ id: "sent", status: "sent", candidate: "键盘到货了吗" }, { key, filePath });
     appendWakeArchive({ id: "blocked", status: "rejected", candidate: "上午好" }, { key, filePath });
+    appendWakeArchive({
+      id: "solo",
+      kind: "solo",
+      status: "kept_private",
+      mode: "mix",
+      summary: "从真实回忆走进幻想",
+      narrative: "这是一段完整的 Solo 经过"
+    }, { key, filePath });
 
-    assert.doesNotMatch(fs.readFileSync(filePath, "utf8"), /键盘|上午好/);
+    assert.doesNotMatch(fs.readFileSync(filePath, "utf8"), /键盘|上午好|完整的 Solo/);
     assert.deepEqual(readWakeArchive({ key, filePath, status: "sent" }).records.map(item => item.id), ["sent"]);
     assert.deepEqual(readWakeArchive({ key, filePath, query: "上午" }).records.map(item => item.id), ["blocked"]);
+    assert.deepEqual(readWakeArchive({ key, filePath, kind: "solo" }).records.map(item => item.id), ["solo"]);
+    assert.deepEqual(readWakeArchive({ key, filePath, query: "完整的 Solo" }).records.map(item => item.id), ["solo"]);
     assert.deepEqual(deleteWakeArchiveRecord("sent", { key, filePath }), { deleted: true });
-    assert.deepEqual(readWakeArchive({ key, filePath }).records.map(item => item.id), ["blocked"]);
+    assert.deepEqual(readWakeArchive({ key, filePath }).records.map(item => item.id), ["solo", "blocked"]);
     assert.equal(fs.existsSync(`${filePath}.bak`), false);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });

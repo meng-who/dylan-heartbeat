@@ -1189,7 +1189,7 @@ function archivePageHtml() {
     .actions { display: flex; gap: 8px; flex-shrink: 0; }
     .button, button { min-height: 38px; border: 1px solid #d9c4cb; border-radius: 6px; padding: 8px 12px; color: #70404e; background: #fff; font: inherit; font-size: 14px; cursor: pointer; text-decoration: none; }
     .button:hover, button:hover { border-color: #a96c7d; }
-    .toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) 180px auto; gap: 10px; padding: 16px 0; border-top: 1px solid #eadde1; border-bottom: 1px solid #eadde1; }
+    .toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) 140px 180px auto; gap: 10px; padding: 16px 0; border-top: 1px solid #eadde1; border-bottom: 1px solid #eadde1; }
     input, select { width: 100%; min-height: 40px; border: 1px solid #d9cbd0; border-radius: 6px; padding: 8px 10px; color: #352e31; background: #fff; font: inherit; }
     input:focus, select:focus { outline: 2px solid #e8cbd4; border-color: #a96c7d; }
     #summary { min-height: 24px; margin: 16px 0 8px; color: #776b70; font-size: 13px; }
@@ -1198,10 +1198,14 @@ function archivePageHtml() {
     .status { border-radius: 999px; padding: 3px 8px; color: #fff; background: #71666a; font-size: 12px; }
     .status-sent { background: #39725c; }
     .status-rejected, .status-push_failed { background: #a44f50; }
+    .kind { border-radius: 999px; padding: 3px 8px; color: #714758; background: #f1dfe5; font-size: 12px; }
     time, .model { color: #80747a; font-size: 12px; }
     .model { margin-left: auto; }
     .candidate { margin: 14px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
     .final { margin: 8px 0; padding-left: 12px; border-left: 3px solid #c996a5; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+    .narrative { margin-top: 10px; }
+    .narrative summary { color: #88465a; cursor: pointer; font-weight: 650; }
+    .narrative-body { margin-top: 10px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
     .meta { color: #7d7176; font-size: 12px; line-height: 1.6; }
     .delete { min-height: 30px; margin-top: 10px; padding: 4px 9px; color: #8f4547; font-size: 12px; }
     .empty { padding: 48px 0; color: #776b70; text-align: center; }
@@ -1218,8 +1222,8 @@ function archivePageHtml() {
   <main>
     <header>
       <div>
-        <h1>Wake Archive</h1>
-        <p>自动唤醒的候选内容与最终结果。档案在磁盘中始终加密保存。</p>
+        <h1>Dylan Archive</h1>
+        <p>自动唤醒与 Solo 独处记录。档案在磁盘中始终加密保存。</p>
       </div>
       <div class="actions">
         <a class="button" href="/admin">返回管理页</a>
@@ -1228,6 +1232,11 @@ function archivePageHtml() {
     </header>
     <div class="toolbar">
       <input id="query" type="search" placeholder="搜索内容、模型或原因">
+      <select id="kind" aria-label="筛选类型">
+        <option value="">全部类型</option>
+        <option value="wake">主动推送</option>
+        <option value="solo">Solo</option>
+      </select>
       <select id="status" aria-label="筛选结果">
         <option value="">全部结果</option>
         <option value="sent">已发送</option>
@@ -1238,6 +1247,7 @@ function archivePageHtml() {
         <option value="diary_only">只写日记</option>
         <option value="empty">空回复</option>
         <option value="not_sent">未发送</option>
+        <option value="kept_private">留在心里</option>
       </select>
       <button id="refresh" type="button">刷新</button>
     </div>
@@ -1248,9 +1258,11 @@ function archivePageHtml() {
     const labels = {
       sent: "已发送", duplicate: "重复拦截", rejected: "内容拦截",
       push_failed: "推送失败", no_action: "AI 选择不发送",
-      diary_only: "只写日记", empty: "空回复", not_sent: "未发送"
+      diary_only: "只写日记", empty: "空回复", not_sent: "未发送",
+      kept_private: "留在心里"
     };
     const query = document.getElementById("query");
+    const kind = document.getElementById("kind");
     const status = document.getElementById("status");
     const records = document.getElementById("records");
     const summary = document.getElementById("summary");
@@ -1267,6 +1279,7 @@ function archivePageHtml() {
       records.replaceChildren();
       const params = new URLSearchParams({ limit: "200" });
       if (query.value.trim()) params.set("q", query.value.trim());
+      if (kind.value) params.set("kind", kind.value);
       if (status.value) params.set("status", status.value);
       try {
         const response = await fetch("/admin/archive/data?" + params.toString(), { cache: "no-store" });
@@ -1287,14 +1300,22 @@ function archivePageHtml() {
     function renderRecord(item) {
       const article = node("article", "record");
       const head = node("div", "record-head");
+      head.append(node("span", "kind", item.kind === "solo" ? "Solo" : "主动推送"));
       head.append(node("span", "status status-" + item.status, labels[item.status] || item.status));
       head.append(node("time", "", item.local_time || item.created_at || "未知时间"));
       head.append(node("span", "model", item.model || "未知模型"));
       article.append(head);
+      if (item.kind === "solo" && item.summary) article.append(node("div", "candidate", item.summary));
       if (item.candidate) article.append(node("div", "candidate", item.candidate));
       if (item.final_title || item.final_body) {
         const finalText = [item.final_title, item.final_body].filter(Boolean).join("\n");
         article.append(node("div", "final", finalText));
+      }
+      if (item.kind === "solo" && item.narrative) {
+        const narrative = node("details", "narrative");
+        narrative.append(node("summary", "", "查看完整经过（" + item.narrative.length + " 字）"));
+        narrative.append(node("div", "narrative-body", item.narrative));
+        article.append(narrative);
       }
       const details = [];
       if (item.reason) details.push("原因：" + item.reason);
@@ -1323,6 +1344,7 @@ function archivePageHtml() {
       searchTimer = setTimeout(loadArchive, 250);
     });
     status.addEventListener("change", loadArchive);
+    kind.addEventListener("change", loadArchive);
     document.getElementById("refresh").addEventListener("click", loadArchive);
     loadArchive();
   </script>
@@ -1351,6 +1373,7 @@ app.get("/admin/archive/data", { preHandler: basicAuth }, async (req, reply) => 
     return readWakeArchive({
       query: req.query?.q,
       status: req.query?.status,
+      kind: req.query?.kind,
       limit: req.query?.limit
     });
   } catch (error) {

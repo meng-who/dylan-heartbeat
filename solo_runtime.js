@@ -212,7 +212,29 @@ async function runSoloCycle(options) {
       notifyWanted: result.notify.send,
       notified
     } });
-    return { ran: true, reason: "completed", mode, recallUsed, notifyWanted: result.notify.send, notified };
+    let archived = false;
+    if (options.archiveSolo) {
+      try {
+        const archiveResult = await options.archiveSolo({
+          kind: "solo",
+          status: result.notify.send ? (notified ? "sent" : "push_failed") : "kept_private",
+          model: options.model || "",
+          mode,
+          intensity: result.intensity,
+          summary: result.summary,
+          narrative: result.narrative,
+          recall_used: recallUsed,
+          notify_wanted: result.notify.send,
+          notified,
+          final_title: result.notify.send ? result.notify.title : "",
+          final_body: result.notify.send ? result.notify.body : ""
+        });
+        archived = Boolean(archiveResult?.saved);
+      } catch (error) {
+        options.logger?.error?.(JSON.stringify({ event: "solo_archive_failed", error: String(error?.message || error) }));
+      }
+    }
+    return { ran: true, reason: "completed", mode, recallUsed, notifyWanted: result.notify.send, notified, archived };
   } catch (error) {
     try { await cancelSolo({ ...pulseOptions, claimId: claim.id }); } catch {}
     throw error;

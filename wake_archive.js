@@ -114,6 +114,7 @@ function readWakeArchive(options = {}) {
   const filePath = archiveFilePath(options.filePath);
   const query = String(options.query || "").trim().toLowerCase();
   const status = String(options.status || "").trim();
+  const kind = String(options.kind || "").trim();
   const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 500);
   let unreadable = 0;
 
@@ -126,14 +127,19 @@ function readWakeArchive(options = {}) {
     }
   }).filter(Boolean).reverse().filter(record => {
     if (status && record.status !== status) return false;
+    if (kind && (record.kind || "wake") !== kind) return false;
     if (!query) return true;
     return [
+      record.kind,
       record.candidate,
       record.final_title,
       record.final_body,
       record.reason,
       record.model,
-      record.status
+      record.status,
+      record.mode,
+      record.summary,
+      record.narrative
     ].some(value => String(value || "").toLowerCase().includes(query));
   }).slice(0, limit);
 

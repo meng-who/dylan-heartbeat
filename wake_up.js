@@ -939,6 +939,10 @@ async function runSoloCheck() {
     systemPrompt,
     getLatestUserAt: getLatestUserAtMs,
     sendPush: sendPushNotification,
+    archiveSolo: record => appendWakeArchive({
+      local_time: getLocalTimeString(),
+      ...record
+    }),
     logger: console
   });
   console.log(JSON.stringify({
@@ -948,7 +952,8 @@ async function runSoloCheck() {
     mode: result.mode || null,
     recall_used: Boolean(result.recallUsed),
     notify_wanted: Boolean(result.notifyWanted),
-    notified: Boolean(result.notified)
+    notified: Boolean(result.notified),
+    archived: Boolean(result.archived)
   }));
   return result;
 }

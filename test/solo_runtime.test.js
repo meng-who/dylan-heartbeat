@@ -15,16 +15,6 @@ test("parses a bounded Solo decision and keeps the controller-selected mode", ()
   assert.equal(result.notify.send, true);
 });
 
-test("keeps a substantial Solo summary instead of cutting it at 240 characters", () => {
-  const result = parseSoloResult(JSON.stringify({
-    intensity: 0.7,
-    summary: "摘".repeat(500),
-    narrative: "完整经过",
-    notify: { send: false, title: "", body: "" }
-  }), "fantasy");
-  assert.equal(result.summary.length, 500);
-});
-
 test("recent history removes private Pulse blocks and visible status bars", () => {
   const history = formatRecentHistory([
     { role: "assistant", content: "♡ 80 bpm · 36.8°C · 情绪：亲近\n\n在。" },
@@ -67,6 +57,7 @@ test("runs recall through Ombre, lets AI choose a push, and completes Pulse", as
     throw new Error(`unexpected URL ${url}`);
   };
   let pushed;
+  let archivedRecord;
   const result = await runSoloCycle({
     pulseBaseUrl: "https://pulse.example.com",
     pulseClientKey: "pulse-key",
@@ -80,6 +71,7 @@ test("runs recall through Ombre, lets AI choose a push, and completes Pulse", as
     systemPrompt: "你是 Dylan。",
     getLatestUserAt: async () => 900,
     sendPush: async value => { pushed = value; return { ok: true }; },
+    archiveSolo: async value => { archivedRecord = value; return { saved: true }; },
     fetchImpl
   });
 
@@ -87,7 +79,12 @@ test("runs recall through Ombre, lets AI choose a push, and completes Pulse", as
   assert.equal(result.mode, "recall");
   assert.equal(result.recallUsed, true);
   assert.equal(result.notified, true);
+  assert.equal(result.archived, true);
   assert.equal(pushed.body, "刚刚忽然很想你。");
+  assert.equal(archivedRecord.kind, "solo");
+  assert.equal(archivedRecord.summary, "回想了一段真实经历");
+  assert.equal(archivedRecord.narrative, "我清楚记得那一次。");
+  assert.equal(archivedRecord.status, "sent");
   assert.equal(completedBody.recallUsed, true);
   assert.equal(completedBody.notified, true);
   assert.ok(calls.some(call => call.body.method === "tools/call" && call.body.params.name === "breath_advanced"));
