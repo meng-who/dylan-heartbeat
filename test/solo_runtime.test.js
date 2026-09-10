@@ -15,6 +15,16 @@ test("parses a bounded Solo decision and keeps the controller-selected mode", ()
   assert.equal(result.notify.send, true);
 });
 
+test("keeps a substantial Solo summary instead of cutting it at 240 characters", () => {
+  const result = parseSoloResult(JSON.stringify({
+    intensity: 0.7,
+    summary: "摘".repeat(500),
+    narrative: "完整经过",
+    notify: { send: false, title: "", body: "" }
+  }), "fantasy");
+  assert.equal(result.summary.length, 500);
+});
+
 test("recent history removes private Pulse blocks and visible status bars", () => {
   const history = formatRecentHistory([
     { role: "assistant", content: "♡ 80 bpm · 36.8°C · 情绪：亲近\n\n在。" },

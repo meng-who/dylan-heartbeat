@@ -59,6 +59,25 @@ test("completing solo leaves a bodily afterglow, cooldown and private record", (
   assert.match(completed.events[0].summary, /选择告诉你/);
 });
 
+test("stores a longer Solo summary together with the full narrative", () => {
+  const now = Date.UTC(2026, 8, 4, 12, 0, 0);
+  const state = createDefaultState(now);
+  state.solo.desire = 0.9;
+  const claimed = claimSolo(state, {
+    lastUserAt: now - 3 * 3_600_000,
+    claimId: "solo-long",
+    randomValue: 0.6
+  }, now);
+  const completed = completeSolo(claimed.state, {
+    claimId: "solo-long",
+    mode: "fantasy",
+    summary: "摘".repeat(500),
+    narrative: "经过".repeat(500)
+  }, now + 1_000);
+  assert.equal(completed.state.solo.latest.summary.length, 500);
+  assert.equal(completed.state.solo.latest.narrative.length, 1000);
+});
+
 test("legacy solo afterglow is shown with the new label", () => {
   const now = Date.UTC(2026, 8, 4, 12, 0, 0);
   const state = createDefaultState(now);

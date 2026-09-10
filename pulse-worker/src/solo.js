@@ -62,7 +62,7 @@ export function completeSolo(input, result = {}, nowMs = Date.now(), timeZone = 
 
   const mode = MODES.has(result.mode) ? result.mode : active.mode;
   const intensity = clamp(result.intensity ?? 0.72);
-  const summary = cleanText(result.summary, 240) || "独处时完成了一次私密的自我安抚";
+  const summary = cleanText(result.summary, 800) || "独处时完成了一次私密的自我安抚";
   const narrative = cleanText(result.narrative, 4000) || summary;
   const recallUsed = Boolean(result.recallUsed && (mode === "recall" || mode === "mix"));
   const notifyWanted = Boolean(result.notifyWanted);

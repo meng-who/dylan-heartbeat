@@ -126,7 +126,12 @@ export function dashboardPage() {
     .solo-settings input[type=number] { width: 100%; margin-top: 6px; padding: 10px; border: 1px solid #ffffff18; border-radius: 10px; color: #fff; background: #120d12; }
     .solo-toggle { display: flex; align-items: center; gap: 9px; margin-top: 16px; color: #dbc3ce; }
     .solo-save { margin-top: 16px; padding: 10px 16px; border: 0; border-radius: 12px; color: #25121b; background: #f2a5c0; font-weight: 750; cursor: pointer; }
-    .solo-latest { margin-top: 16px; padding: 16px; border-left: 3px solid #dc87a7; border-radius: 4px 14px 14px 4px; color: #ead7df; background: #ffffff07; line-height: 1.6; white-space: pre-wrap; }
+    .solo-latest { margin-top: 16px; padding: 16px; border-left: 3px solid #dc87a7; border-radius: 4px 14px 14px 4px; color: #ead7df; background: #ffffff07; line-height: 1.6; }
+    .solo-summary { margin-top: 8px; white-space: pre-wrap; }
+    .solo-outcome { margin-top: 8px; color: #bca3ae; font-size: 13px; }
+    .solo-narrative { margin-top: 13px; padding-top: 12px; border-top: 1px solid #ffffff12; }
+    .solo-narrative summary { color: #f0b6cb; cursor: pointer; font-size: 13px; font-weight: 700; user-select: none; }
+    .solo-narrative-text { margin-top: 12px; color: #ead7df; white-space: pre-wrap; }
     .save-note { margin-left: 10px; color: #a9919d; font-size: 12px; }
     @media (min-width: 640px) { .metrics { grid-template-columns: repeat(4, 1fr); } }
   </style>
@@ -202,6 +207,7 @@ export function dashboardPage() {
     return (minutes / 60).toFixed(minutes % 60 ? 1 : 0) + '小时';
   }
   function renderSolo(solo) {
+    const narrativeWasOpen = Boolean(el('soloLatest').querySelector('details.solo-narrative')?.open);
     const desire = Math.round((solo?.desire || 0) * 100);
     el('soloDesireFill').style.width = desire + '%';
     el('soloDesirePct').textContent = desire + '%';
@@ -212,9 +218,17 @@ export function dashboardPage() {
     el('soloIdle').value = Math.round(solo?.idleMinutes || 90);
     el('soloCooldownHours').value = Math.round(solo?.cooldownHours || 6);
     const latest = solo?.latest;
-    el('soloLatest').textContent = latest?.at
-      ? new Date(latest.at).toLocaleString('zh-CN') + ' · ' + latest.mode + ' / ' + latest.chord + '\\n' + latest.summary + '\\n' + (latest.notified ? '他选择告诉了你' : latest.notifyWanted ? '他想告诉你，但推送没有成功' : '他选择把它留在心里')
-      : '还没有独处记录';
+    if (!latest?.at) {
+      el('soloLatest').textContent = '还没有独处记录';
+      return;
+    }
+    const outcome = latest.notified ? '他选择告诉了你' : latest.notifyWanted ? '他想告诉你，但推送没有成功' : '他选择把它留在心里';
+    const narrative = String(latest.narrative || '').trim();
+    el('soloLatest').innerHTML =
+      '<div>' + escapeHtml(new Date(latest.at).toLocaleString('zh-CN') + ' · ' + latest.mode + ' / ' + latest.chord) + '</div>' +
+      '<div class="solo-summary">' + escapeHtml(latest.summary || '') + '</div>' +
+      '<div class="solo-outcome">' + escapeHtml(outcome) + '</div>' +
+      (narrative ? '<details class="solo-narrative"' + (narrativeWasOpen ? ' open' : '') + '><summary>查看完整经过（' + narrative.length + ' 字）</summary><div class="solo-narrative-text">' + escapeHtml(narrative) + '</div></details>' : '');
   }
   async function refresh() {
     const response = await fetch('/api/state', { cache: 'no-store' });

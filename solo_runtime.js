@@ -104,7 +104,7 @@ function parseSoloResult(text, expectedMode) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Solo 模型没有返回对象");
   const mode = ["recall", "fantasy", "mix"].includes(expectedMode) ? expectedMode : "fantasy";
   const intensity = Math.max(0, Math.min(1, Number(value.intensity) || 0.7));
-  const summary = String(value.summary || "").trim().slice(0, 240);
+  const summary = String(value.summary || "").trim().slice(0, 800);
   const narrative = String(value.narrative || "").trim().slice(0, 4000);
   if (!summary || !narrative) throw new Error("Solo 模型结果缺少摘要或经过");
   const send = Boolean(value.notify?.send);

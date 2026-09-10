@@ -166,7 +166,7 @@ function safeSoloLatest(value) {
     at: Number.isFinite(Number(value.at)) ? Number(value.at) : null,
     mode,
     chord: String(value.chord || "").slice(0, 40),
-    summary: String(value.summary || "").slice(0, 240),
+    summary: String(value.summary || "").slice(0, 800),
     narrative: String(value.narrative || "").slice(0, 4000),
     recallUsed: Boolean(value.recallUsed),
     notifyWanted: Boolean(value.notifyWanted),

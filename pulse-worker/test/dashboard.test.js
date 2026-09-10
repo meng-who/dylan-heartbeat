@@ -8,4 +8,7 @@ test("dashboard client script is valid JavaScript", () => {
   const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   assert.ok(script, "dashboard script should exist");
   assert.doesNotThrow(() => new Function(script));
+  assert.match(html, /查看完整经过/);
+  assert.match(html, /latest\.narrative/);
+  assert.match(html, /narrativeWasOpen/);
 });
