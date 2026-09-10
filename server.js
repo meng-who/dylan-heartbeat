@@ -1308,7 +1308,7 @@ function archivePageHtml() {
       if (item.kind === "solo" && item.summary) article.append(node("div", "candidate", item.summary));
       if (item.candidate) article.append(node("div", "candidate", item.candidate));
       if (item.final_title || item.final_body) {
-        const finalText = [item.final_title, item.final_body].filter(Boolean).join("\n");
+        const finalText = [item.final_title, item.final_body].filter(Boolean).join("\\n");
         article.append(node("div", "final", finalText));
       }
       if (item.kind === "solo" && item.narrative) {
