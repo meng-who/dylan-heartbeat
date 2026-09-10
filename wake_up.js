@@ -5,7 +5,11 @@ const { buildNtfyPayload } = require("./ntfy_priority");
 const { dataPath, resolveDataPath } = require("./storage");
 const { parseChatCompletionResponse } = require("./upstream_response");
 const { getLatestUserActivity, parseUserActivityRecord } = require("./timeline_activity");
-const { findWakeOutputViolations, parseNoActionDirective } = require("./wake_guardrails");
+const {
+  findWakeOutputViolations,
+  parseNoActionDirective,
+  repairWrongLocalGreeting
+} = require("./wake_guardrails");
 const { isSpecialEventContent } = require("./special_events");
 const { findSimilarRecentPush, getRecentSentPushes } = require("./wake_dedup");
 const { runSoloCycle } = require("./solo_runtime");
@@ -728,14 +732,31 @@ ${recentSentPushes.length
       : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
   } else {
     // 没有 [NO_ACTION] 就视为想发推送
-    console.log("\nAI 选择发送推送\n");
+    console.log("\nAI 生成了候选推送，正在校验\n");
     let barkText = aiText;
 
-    const outputViolations = findWakeOutputViolations(barkText, {
+    const localDayPeriod = getChineseDayPeriod(new Date(), TIME_ZONE);
+    let outputViolations = findWakeOutputViolations(barkText, {
       diffMinutes,
-      dayPeriod: getChineseDayPeriod(new Date(), TIME_ZONE),
+      dayPeriod: localDayPeriod,
       weekday: getChineseWeekday(new Date(), TIME_ZONE)
     });
+    if (outputViolations.includes("wrong_local_greeting")) {
+      const repairedText = repairWrongLocalGreeting(barkText, localDayPeriod);
+      if (repairedText !== barkText) {
+        barkText = repairedText;
+        outputViolations = findWakeOutputViolations(barkText, {
+          diffMinutes,
+          dayPeriod: localDayPeriod,
+          weekday: getChineseWeekday(new Date(), TIME_ZONE)
+        });
+        console.log(JSON.stringify({
+          event: "wake_output_repaired",
+          repair: "local_greeting",
+          local_period: localDayPeriod
+        }));
+      }
+    }
     if (outputViolations.length > 0) {
       console.warn(JSON.stringify({
         event: "wake_output_rejected",
@@ -806,6 +827,11 @@ ${recentSentPushes.length
           console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
           eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
         } else {
+          console.log(JSON.stringify({
+            event: "wake_push_sent",
+            provider: pushResult.providerLabel,
+            local_time: getLocalTimeString()
+          }));
           eventContent = `（${getLocalTimeString()} 刚刚给用户发了${pushResult.providerLabel}推送：${safeTitle}｜${safeBody}）`;
         }
       }

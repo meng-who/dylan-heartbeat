@@ -39,6 +39,22 @@ function findWakeOutputViolations(text, { diffMinutes, dayPeriod, weekday } = {}
   return violations;
 }
 
+function repairWrongLocalGreeting(text, dayPeriod) {
+  const replacements = {
+    凌晨: "夜深了",
+    上午: "上午好",
+    中午: "中午好",
+    下午: "下午好",
+    晚上: "晚上好"
+  };
+  const replacement = replacements[dayPeriod];
+  if (!replacement) return String(text || "");
+  return String(text || "").replace(
+    /早上好|早安|上午好|中午好|下午好|傍晚好|晚上好|晚安/,
+    replacement
+  );
+}
+
 function parseNoActionDirective(text) {
   const value = String(text || "").trim();
   // 兼容 [NO_ACTION]、[NO\_ACTION]、[NO-ACTION]、[NO ACTION]，且不要求位于开头。
@@ -54,4 +70,4 @@ function parseNoActionDirective(text) {
   return { matched: true, reason };
 }
 
-module.exports = { findWakeOutputViolations, parseNoActionDirective };
+module.exports = { findWakeOutputViolations, parseNoActionDirective, repairWrongLocalGreeting };

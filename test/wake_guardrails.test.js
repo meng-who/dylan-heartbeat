@@ -1,6 +1,10 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { findWakeOutputViolations, parseNoActionDirective } = require("../wake_guardrails");
+const {
+  findWakeOutputViolations,
+  parseNoActionDirective,
+  repairWrongLocalGreeting
+} = require("../wake_guardrails");
 
 test("rejects invented day-long absences when the user chatted recently", () => {
   assert.deepEqual(
@@ -13,6 +17,15 @@ test("rejects greetings that contradict the user's local period", () => {
   assert.deepEqual(
     findWakeOutputViolations("晚上好，想你了。", { diffMinutes: 90, dayPeriod: "下午" }),
     ["wrong_local_greeting"]
+  );
+});
+
+test("repairs a wrong greeting without discarding the candidate push", () => {
+  const repaired = repairWrongLocalGreeting("上午好，刚才那件事处理完了吗？", "中午");
+  assert.equal(repaired, "中午好，刚才那件事处理完了吗？");
+  assert.deepEqual(
+    findWakeOutputViolations(repaired, { diffMinutes: 585, dayPeriod: "中午", weekday: "星期四" }),
+    []
   );
 });
 
