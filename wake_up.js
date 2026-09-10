@@ -12,6 +12,7 @@ const {
 } = require("./wake_guardrails");
 const { isSpecialEventContent } = require("./special_events");
 const { findSimilarRecentPush, getRecentSentPushes } = require("./wake_dedup");
+const { appendWakeArchive, buildWakeArchiveOutcome } = require("./wake_archive");
 const { runSoloCycle } = require("./solo_runtime");
 const {
   formatDateTimeInTimeZone,
@@ -716,6 +717,7 @@ ${recentSentPushes.length
   const noActionDirective = parseNoActionDirective(aiText);
 
   let eventContent;
+  const archiveRepairs = [];
 
   if (!aiText) {
     console.log("\nAI 未返回推送内容，本次不发送推送\n");
@@ -755,6 +757,7 @@ ${recentSentPushes.length
           repair: "local_greeting",
           local_period: localDayPeriod
         }));
+        archiveRepairs.push("local_greeting");
       }
     }
     if (outputViolations.length > 0) {
@@ -822,7 +825,16 @@ ${recentSentPushes.length
       }
 
       if (!eventContent) {
-        const pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
+        let pushResult;
+        try {
+          pushResult = await sendPushNotification({ title: safeTitle, body: safeBody });
+        } catch (error) {
+          pushResult = {
+            ok: false,
+            providerLabel: (process.env.PUSH_PROVIDER || "bark").trim().toLowerCase(),
+            reason: error.message || String(error)
+          };
+        }
         if (!pushResult.ok) {
           console.log(`\n${pushResult.providerLabel} 推送失败，本次不发送推送\n`);
           eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${pushResult.providerLabel} 推送失败：${pushResult.reason}）`;
@@ -836,6 +848,33 @@ ${recentSentPushes.length
         }
       }
     }
+  }
+
+  try {
+    const outcome = buildWakeArchiveOutcome(eventContent, {
+      noAction: noActionDirective.matched
+    });
+    const archiveResult = appendWakeArchive({
+      local_time: getLocalTimeString(),
+      model: usedModel,
+      used_backup: usedBackup,
+      diff_minutes: diffMinutes,
+      candidate: aiText,
+      repairs: archiveRepairs,
+      provider: (process.env.PUSH_PROVIDER || "bark").trim().toLowerCase(),
+      ...outcome
+    });
+    console.log(JSON.stringify({
+      event: archiveResult.saved ? "wake_archive_saved" : "wake_archive_skipped",
+      archive_id: archiveResult.id || "",
+      status: outcome.status,
+      reason: archiveResult.reason || ""
+    }));
+  } catch (error) {
+    console.error(JSON.stringify({
+      event: "wake_archive_failed",
+      error: error.message || String(error)
+    }));
   }
 
   try {

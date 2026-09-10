@@ -21,6 +21,12 @@ const {
 const { createUserActivityRecord, stampLatestUserActivity } = require("./timeline_activity");
 const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
 const {
+  DEFAULT_ARCHIVE_PATH,
+  archiveConfigured,
+  deleteWakeArchiveRecord,
+  readWakeArchive
+} = require("./wake_archive");
+const {
   applyHttpResilience,
   isToolFollowUp,
   requestTraceId
@@ -1164,6 +1170,219 @@ function basicAuth(req, reply, done) {
   }
 }
 
+function archivePageHtml() {
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Wake Archive</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; color: #352e31; background: #fbf8f9; font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    main { width: min(920px, calc(100% - 32px)); margin: 36px auto 72px; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
+    h1 { margin: 0 0 6px; color: #7f4052; font-family: Georgia, serif; font-size: 28px; font-weight: 500; letter-spacing: 0; }
+    header p { margin: 0; color: #776b70; font-size: 14px; line-height: 1.6; }
+    a { color: #88465a; }
+    .actions { display: flex; gap: 8px; flex-shrink: 0; }
+    .button, button { min-height: 38px; border: 1px solid #d9c4cb; border-radius: 6px; padding: 8px 12px; color: #70404e; background: #fff; font: inherit; font-size: 14px; cursor: pointer; text-decoration: none; }
+    .button:hover, button:hover { border-color: #a96c7d; }
+    .toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) 180px auto; gap: 10px; padding: 16px 0; border-top: 1px solid #eadde1; border-bottom: 1px solid #eadde1; }
+    input, select { width: 100%; min-height: 40px; border: 1px solid #d9cbd0; border-radius: 6px; padding: 8px 10px; color: #352e31; background: #fff; font: inherit; }
+    input:focus, select:focus { outline: 2px solid #e8cbd4; border-color: #a96c7d; }
+    #summary { min-height: 24px; margin: 16px 0 8px; color: #776b70; font-size: 13px; }
+    .record { padding: 20px 0; border-bottom: 1px solid #eadde1; }
+    .record-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .status { border-radius: 999px; padding: 3px 8px; color: #fff; background: #71666a; font-size: 12px; }
+    .status-sent { background: #39725c; }
+    .status-rejected, .status-push_failed { background: #a44f50; }
+    time, .model { color: #80747a; font-size: 12px; }
+    .model { margin-left: auto; }
+    .candidate { margin: 14px 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.7; }
+    .final { margin: 8px 0; padding-left: 12px; border-left: 3px solid #c996a5; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.65; }
+    .meta { color: #7d7176; font-size: 12px; line-height: 1.6; }
+    .delete { min-height: 30px; margin-top: 10px; padding: 4px 9px; color: #8f4547; font-size: 12px; }
+    .empty { padding: 48px 0; color: #776b70; text-align: center; }
+    @media (max-width: 640px) {
+      main { width: min(100% - 24px, 920px); margin-top: 22px; }
+      header { display: block; }
+      .actions { margin-top: 16px; }
+      .toolbar { grid-template-columns: 1fr; }
+      .model { width: 100%; margin-left: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <h1>Wake Archive</h1>
+        <p>自动唤醒的候选内容与最终结果。档案在磁盘中始终加密保存。</p>
+      </div>
+      <div class="actions">
+        <a class="button" href="/admin">返回管理页</a>
+        <a class="button" href="/admin/archive/export">导出密文</a>
+      </div>
+    </header>
+    <div class="toolbar">
+      <input id="query" type="search" placeholder="搜索内容、模型或原因">
+      <select id="status" aria-label="筛选结果">
+        <option value="">全部结果</option>
+        <option value="sent">已发送</option>
+        <option value="duplicate">重复拦截</option>
+        <option value="rejected">内容拦截</option>
+        <option value="push_failed">推送失败</option>
+        <option value="no_action">AI 选择不发送</option>
+        <option value="diary_only">只写日记</option>
+        <option value="empty">空回复</option>
+        <option value="not_sent">未发送</option>
+      </select>
+      <button id="refresh" type="button">刷新</button>
+    </div>
+    <div id="summary"></div>
+    <section id="records" aria-live="polite"></section>
+  </main>
+  <script>
+    const labels = {
+      sent: "已发送", duplicate: "重复拦截", rejected: "内容拦截",
+      push_failed: "推送失败", no_action: "AI 选择不发送",
+      diary_only: "只写日记", empty: "空回复", not_sent: "未发送"
+    };
+    const query = document.getElementById("query");
+    const status = document.getElementById("status");
+    const records = document.getElementById("records");
+    const summary = document.getElementById("summary");
+
+    function node(tag, className, text) {
+      const element = document.createElement(tag);
+      if (className) element.className = className;
+      if (text !== undefined) element.textContent = text;
+      return element;
+    }
+
+    async function loadArchive() {
+      summary.textContent = "读取中...";
+      records.replaceChildren();
+      const params = new URLSearchParams({ limit: "200" });
+      if (query.value.trim()) params.set("q", query.value.trim());
+      if (status.value) params.set("status", status.value);
+      try {
+        const response = await fetch("/admin/archive/data?" + params.toString(), { cache: "no-store" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "读取失败");
+        summary.textContent = "共显示 " + data.records.length + " 条" + (data.unreadable ? "，另有 " + data.unreadable + " 条无法解密" : "");
+        if (!data.records.length) {
+          records.append(node("div", "empty", "还没有符合条件的档案。"));
+          return;
+        }
+        data.records.forEach(renderRecord);
+      } catch (error) {
+        summary.textContent = error.message;
+        records.append(node("div", "empty", "请确认已配置 WAKE_ARCHIVE_KEY 并重新部署。"));
+      }
+    }
+
+    function renderRecord(item) {
+      const article = node("article", "record");
+      const head = node("div", "record-head");
+      head.append(node("span", "status status-" + item.status, labels[item.status] || item.status));
+      head.append(node("time", "", item.local_time || item.created_at || "未知时间"));
+      head.append(node("span", "model", item.model || "未知模型"));
+      article.append(head);
+      if (item.candidate) article.append(node("div", "candidate", item.candidate));
+      if (item.final_title || item.final_body) {
+        const finalText = [item.final_title, item.final_body].filter(Boolean).join("\n");
+        article.append(node("div", "final", finalText));
+      }
+      const details = [];
+      if (item.reason) details.push("原因：" + item.reason);
+      if (Array.isArray(item.repairs) && item.repairs.length) details.push("修复：" + item.repairs.join("、"));
+      if (item.used_backup) details.push("使用备用模型");
+      if (details.length) article.append(node("div", "meta", details.join(" · ")));
+      const remove = node("button", "delete", "删除此条");
+      remove.type = "button";
+      remove.addEventListener("click", async () => {
+        if (!confirm("确定永久删除这条档案吗？")) return;
+        const response = await fetch("/admin/archive/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: item.id })
+        });
+        if (response.ok) loadArchive();
+        else alert("删除失败");
+      });
+      article.append(remove);
+      records.append(article);
+    }
+
+    let searchTimer;
+    query.addEventListener("input", () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(loadArchive, 250);
+    });
+    status.addEventListener("change", loadArchive);
+    document.getElementById("refresh").addEventListener("click", loadArchive);
+    loadArchive();
+  </script>
+</body>
+</html>`;
+}
+
+function setArchivePrivacyHeaders(reply) {
+  return reply
+    .header("Cache-Control", "no-store")
+    .header("Referrer-Policy", "no-referrer")
+    .header("X-Content-Type-Options", "nosniff")
+    .header("X-Frame-Options", "DENY");
+}
+
+app.get("/admin/archive", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply).type("text/html").send(archivePageHtml());
+});
+
+app.get("/admin/archive/data", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  if (!archiveConfigured()) {
+    return reply.code(503).send({ configured: false, error: "WAKE_ARCHIVE_KEY 无效或未配置" });
+  }
+  try {
+    return readWakeArchive({
+      query: req.query?.q,
+      status: req.query?.status,
+      limit: req.query?.limit
+    });
+  } catch (error) {
+    req.log.error({ event: "wake_archive_read_failed", error: error.message });
+    return reply.code(500).send({ error: "档案读取失败" });
+  }
+});
+
+app.post("/admin/archive/delete", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  const id = String(req.body?.id || "").trim();
+  if (!id) return reply.code(400).send({ error: "缺少档案 id" });
+  try {
+    const result = deleteWakeArchiveRecord(id);
+    return reply.code(result.deleted ? 200 : 404).send(result);
+  } catch (error) {
+    req.log.error({ event: "wake_archive_delete_failed", error: error.message });
+    return reply.code(500).send({ error: "档案删除失败" });
+  }
+});
+
+app.get("/admin/archive/export", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  if (!archiveConfigured()) return reply.code(503).send("WAKE_ARCHIVE_KEY 无效或未配置");
+  const date = new Date().toISOString().slice(0, 10);
+  const content = fs.existsSync(DEFAULT_ARCHIVE_PATH) ? fs.readFileSync(DEFAULT_ARCHIVE_PATH) : Buffer.alloc(0);
+  reply
+    .header("Content-Disposition", `attachment; filename="wake-archive-encrypted-${date}.jsonl"`)
+    .type("application/x-ndjson")
+    .send(content);
+});
+
 // ========================
 // 管理页面 GET /admin
 // ========================
@@ -1177,6 +1396,7 @@ app.get("/admin", { preHandler: basicAuth }, async (req, reply) => {
   const currentModel = readEnvValue("MODEL_NAME");
   const currentIcon = readEnvValue("CUSTOM_ICON_URL");
   const gatewayKeyStatus = readEnvValue("GATEWAY_API_KEY") ? "已配置" : "未配置";
+  const archiveStatus = archiveConfigured() ? "已启用（磁盘加密）" : "未配置 WAKE_ARCHIVE_KEY";
   const wakeConfig = {
     dayWakeAfter: readEnvValueOrDefault("DAY_WAKE_AFTER_MINUTES", "60"),
     nightWakeAfter: readEnvValueOrDefault("NIGHT_WAKE_AFTER_MINUTES", "120"),
@@ -1563,6 +1783,13 @@ const html = `<!DOCTYPE html>
       text-transform: uppercase;
     }
 
+    .archive-link {
+      display: inline-block;
+      margin: 0 0 18px;
+      color: #8b4d5f;
+      font-size: 14px;
+    }
+
     .diary-entry {
       border: 1px solid rgba(220, 180, 190, 0.3);
       border-radius: 12px;
@@ -1672,6 +1899,8 @@ const html = `<!DOCTYPE html>
       <h3>Wake Diary</h3>
       ${diaryHtml}
     </div>
+
+    <a class="archive-link" href="/admin/archive">打开 Wake Archive · ${escapeHtml(archiveStatus)}</a>
 
     <!-- 预设方案 -->
     <div class="presets-box">
