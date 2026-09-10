@@ -1306,9 +1306,13 @@ function archivePageHtml() {
       head.append(node("span", "model", item.model || "未知模型"));
       article.append(head);
       if (item.kind === "solo" && item.summary) article.append(node("div", "candidate", item.summary));
-      if (item.candidate) article.append(node("div", "candidate", item.candidate));
-      if (item.final_title || item.final_body) {
-        const finalText = [item.final_title, item.final_body].filter(Boolean).join("\\n");
+      const hasFinal = Boolean(item.final_title || item.final_body);
+      const finalText = hasFinal
+        ? [item.final_title, item.final_body].filter(Boolean).join("\\n")
+        : "";
+      const candidateMatchesFinal = String(item.candidate || "").trim() === finalText.trim();
+      if (item.candidate && !candidateMatchesFinal) article.append(node("div", "candidate", item.candidate));
+      if (hasFinal) {
         article.append(node("div", "final", finalText));
       }
       if (item.kind === "solo" && item.narrative) {
