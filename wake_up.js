@@ -1052,6 +1052,7 @@ async function runActivityCheck() {
       apiKey: process.env.TARGET_API_KEY,
       model: process.env.MODEL_NAME,
       backupModel: process.env.BACKUP_MODEL_NAME,
+      logger: console,
       modelTimeoutMs: WAKE_UPSTREAM_TIMEOUT_MS,
       systemPrompt,
       history,
@@ -1074,12 +1075,15 @@ async function runActivityCheck() {
       saveActivityState(nextState);
     }
   } catch (error) {
+    const invalidModelOutput = error.activityStage === "model_output";
     result = {
       ran: true,
       status: "failed",
-      reason: error.message || String(error),
-      decision: error.activityDecision,
-      source: error.activitySource || "activity"
+      reason: invalidModelOutput
+        ? `模型输出格式错误（已自动重试一次）：${error.message || String(error)}`
+        : error.message || String(error),
+      decision: error.activityDecision || (invalidModelOutput ? { action: "model_decision" } : undefined),
+      source: error.activitySource || (invalidModelOutput ? "model" : "activity")
     };
   }
 

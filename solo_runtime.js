@@ -165,12 +165,22 @@ function shouldFallback(status, text = "") {
   return [400, 404].includes(status) && /model|模型/i.test(text) && /not found|unavailable|不存在|不可用/i.test(text);
 }
 
-async function requestSoloModel({ apiUrl, apiKey, model, backupModel = "", messages, timeoutMs = 300_000, fetchImpl = fetch }) {
+async function requestSoloModel({
+  apiUrl,
+  apiKey,
+  model,
+  backupModel = "",
+  messages,
+  timeoutMs = 300_000,
+  fetchImpl = fetch,
+  temperature = 0.9,
+  topP = 0.95
+}) {
   const request = selectedModel => fetchImpl(apiUrl, {
     method: "POST",
     signal: AbortSignal.timeout(Math.max(1000, Number(timeoutMs) || 300_000)),
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: selectedModel, messages, temperature: 0.9, top_p: 0.95, stream: false })
+    body: JSON.stringify({ model: selectedModel, messages, temperature, top_p: topP, stream: false })
   });
   let response = await request(model);
   let text = await response.text();

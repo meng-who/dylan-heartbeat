@@ -51,6 +51,29 @@ test("parses safe Ombre activity decisions", () => {
   });
 });
 
+test("retries one malformed Activity JSON response at lower temperature", async () => {
+  const requests = [];
+  const fetchImpl = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    requests.push(body);
+    const content = requests.length === 1
+      ? '{"action":"none","reason":"引号"坏了"}'
+      : '{"action":"none","reason":"现在格式正确"}';
+    return Response.json({ choices: [{ message: { content } }] });
+  };
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    enabledActions: "spotify",
+    fetchImpl
+  });
+  assert.equal(result.status, "kept_private");
+  assert.equal(result.decision.reason, "现在格式正确");
+  assert.equal(requests.length, 2);
+  assert.equal(requests[0].temperature, 0.4);
+  assert.match(requests[1].messages.at(-1).content, /完整合法的 JSON/);
+});
+
 test("searches and adds one track without exposing playback tools", async () => {
   const calls = [];
   const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });

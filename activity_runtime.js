@@ -157,21 +157,50 @@ async function loadOmbreContext(options) {
   return { client, tools, context, failures };
 }
 
+async function requestActivityDecision(options, messages) {
+  let currentMessages = messages;
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const raw = await requestSoloModel({
+      apiUrl: options.apiUrl,
+      apiKey: options.apiKey,
+      model: options.model,
+      backupModel: options.backupModel,
+      messages: currentMessages,
+      timeoutMs: options.modelTimeoutMs,
+      fetchImpl: options.fetchImpl || fetch,
+      temperature: 0.4,
+      topP: 0.9
+    });
+    try {
+      return parseActivityDecision(raw);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 2) break;
+      options.logger?.warn?.(JSON.stringify({ event: "activity_model_retry", reason: "invalid_model_output" }));
+      currentMessages = [
+        ...messages,
+        { role: "assistant", content: String(raw).slice(0, 6000) },
+        {
+          role: "user",
+          content: "上一条输出不是完整合法的 JSON。请保持同一个决定重新输出一次，只输出 JSON 对象；字符串里的换行、双引号和反斜杠必须正确转义，不要 Markdown 或解释。"
+        }
+      ];
+    }
+  }
+  lastError.activityStage = "model_output";
+  throw lastError;
+}
+
 async function runActivityCycle(options) {
   const enabledActions = parseEnabledActions(options.enabledActions);
   let ombre;
   if (enabledActions.includes("ombre")) ombre = await loadOmbreContext(options);
 
-  const raw = await requestSoloModel({
-    apiUrl: options.apiUrl,
-    apiKey: options.apiKey,
-    model: options.model,
-    backupModel: options.backupModel,
-    messages: buildActivityMessages({ ...options, enabledActions, ombreContext: ombre?.context }),
-    timeoutMs: options.modelTimeoutMs,
-    fetchImpl: options.fetchImpl || fetch
-  });
-  const decision = parseActivityDecision(raw);
+  const decision = await requestActivityDecision(
+    options,
+    buildActivityMessages({ ...options, enabledActions, ombreContext: ombre?.context })
+  );
   if (decision.action === "none") return { ran: true, status: "kept_private", decision, source: "private" };
 
   try {
@@ -256,6 +285,7 @@ module.exports = {
   loadOmbreContext,
   parseActivityDecision,
   parseEnabledActions,
+  requestActivityDecision,
   resolvePlaylistAddAction,
   runActivityCycle
 };
