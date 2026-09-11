@@ -43,6 +43,7 @@ const DIARY_DIR_PATH = resolveDataPath(DIARY_DIR_NAME, "diary");
 const PUSH_TIMEOUT_MS = readPositiveTimeout("PUSH_TIMEOUT_MS", 15_000);
 const WAKE_UPSTREAM_TIMEOUT_MS = readPositiveTimeout("WAKE_UPSTREAM_TIMEOUT_MS", 300_000);
 let activeBackgroundTask = "";
+let lastActivityCheckReason = "";
 
 function readPositiveTimeout(key, fallback) {
   const value = Number(process.env[key]);
@@ -1015,6 +1016,12 @@ async function runActivityCheck() {
     recent_track_uris: Array.isArray(state.recent_track_uris) ? state.recent_track_uris.slice(-99) : []
   };
   saveActivityState(nextState);
+  console.log(JSON.stringify({
+    event: "activity_model_request",
+    idle_minutes: gate.idleMinutes,
+    daily_slot: nextState.count,
+    daily_limit: readNumberEnv("AUTONOMY_MAX_ACTIONS_PER_DAY", 3, { min: 1, max: 24 })
+  }));
 
   const cleanMessages = stripPosition(getWakeHistoryMessages(messages));
   const historyLimit = readNumberEnv("AUTONOMY_HISTORY_MESSAGES", 30, { min: 4, max: 100 });
@@ -1051,6 +1058,28 @@ async function runActivityCheck() {
     }
   } catch (error) {
     result = { ran: true, status: "failed", reason: error.message || String(error) };
+  }
+
+  if (result.status === "success") {
+    const playlistName = String(process.env.SPOTIFY_PLAYLIST_NAME || "自主收藏").trim();
+    const detail = [
+      `向 Spotify 歌单「${playlistName}」添加了搜索结果「${result.decision?.query || "一首歌"}」`,
+      result.decision?.reason ? `选择原因：${result.decision.reason}` : ""
+    ].filter(Boolean).join("；");
+    try {
+      const eventResponse = await fetch(GATEWAY_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Gateway-API-Key": process.env.GATEWAY_API_KEY || ""
+        },
+        body: JSON.stringify({ content: `（${getLocalTimeString()} 自主活动：${detail}）` })
+      });
+      if (!eventResponse.ok) throw new Error(`Gateway 返回 HTTP ${eventResponse.status}`);
+      console.log(JSON.stringify({ event: "activity_timeline_recorded", source: "spotify" }));
+    } catch (error) {
+      console.error(JSON.stringify({ event: "activity_timeline_failed", error: error.message || String(error) }));
+    }
   }
 
   const archiveRecord = {
@@ -1149,7 +1178,16 @@ async function scheduleActivityCheck() {
     } else {
       activeBackgroundTask = "activity";
       try {
-        await runActivityCheck();
+        const result = await runActivityCheck();
+        if (result.ran) {
+          lastActivityCheckReason = "ran";
+        } else if (result.reason !== lastActivityCheckReason) {
+          lastActivityCheckReason = result.reason;
+          console.log(JSON.stringify({
+            event: "activity_check_skipped",
+            reason: result.reason
+          }));
+        }
       } finally {
         activeBackgroundTask = "";
       }
@@ -1168,3 +1206,9 @@ setTimeout(scheduleActivityCheck, 30_000);
 console.log("\n==================================");
 console.log("Dylan Heartbeat Runtime 已启动（动态间隔）");
 console.log("==================================\n");
+console.log(JSON.stringify({
+  event: "activity_scheduler_started",
+  enabled: readBooleanEnv("AUTONOMY_ENABLED", false),
+  night_only: readBooleanEnv("AUTONOMY_NIGHT_ONLY", false),
+  check_interval_minutes: getActivityCheckIntervalMs() / 60_000
+}));
