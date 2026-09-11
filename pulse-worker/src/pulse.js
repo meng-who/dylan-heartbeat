@@ -153,6 +153,8 @@ function defaultSoloState(nowMs) {
     lastTickAt: nowMs,
     lastSoloAt: null,
     cooldownUntil: null,
+    failureCount: 0,
+    lastFailureAt: null,
     inProgress: null,
     pendingHandoff: null,
     latest: null
@@ -194,6 +196,8 @@ function normalizeSoloState(value, nowMs) {
     lastTickAt: Number.isFinite(Number(value.lastTickAt)) ? Number(value.lastTickAt) : nowMs,
     lastSoloAt: value.lastSoloAt != null && Number.isFinite(Number(value.lastSoloAt)) ? Number(value.lastSoloAt) : null,
     cooldownUntil: value.cooldownUntil != null && Number.isFinite(Number(value.cooldownUntil)) ? Number(value.cooldownUntil) : null,
+    failureCount: clamp(Math.floor(Number(value.failureCount) || 0), 0, 3),
+    lastFailureAt: value.lastFailureAt != null && Number.isFinite(Number(value.lastFailureAt)) ? Number(value.lastFailureAt) : null,
     inProgress: inProgress?.id ? inProgress : null,
     pendingHandoff: ["recall", "fantasy", "mix"].includes(value.pendingHandoff) ? value.pendingHandoff : null,
     latest: safeSoloLatest(value.latest)

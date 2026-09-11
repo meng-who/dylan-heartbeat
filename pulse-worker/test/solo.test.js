@@ -81,7 +81,7 @@ test("a user return cancels an active solo run", () => {
   assert.match(cancelled.events[0].summary, /立即停下/);
 });
 
-test("a technical Solo failure has its own event and a longer retry cooldown", () => {
+test("technical Solo failures use a short progressive retry cooldown", () => {
   const now = Date.UTC(2026, 8, 4, 12, 0, 0);
   const state = createDefaultState(now);
   state.solo.desire = 0.9;
@@ -101,7 +101,21 @@ test("a technical Solo failure has its own event and a longer retry cooldown", (
   assert.equal(cancelled.reason, "technical_failure");
   assert.doesNotMatch(cancelled.events[0].summary, /你回来/);
   assert.match(cancelled.events[0].summary, /模型回复格式异常/);
-  assert.ok(cancelled.state.solo.cooldownUntil >= now + 6 * 3_600_000);
+  assert.equal(cancelled.state.solo.failureCount, 1);
+  assert.ok(cancelled.state.solo.cooldownUntil >= now + 30 * 60_000);
+
+  cancelled.state.solo.inProgress = {
+    id: "solo-error-2", startedAt: now + 31 * 60_000, mode: "fantasy", chord: "兴奋上扬"
+  };
+  const failedAgain = cancelSolo(
+    cancelled.state,
+    "solo-error-2",
+    now + 31 * 60_000,
+    "Asia/Shanghai",
+    { reason: "technical_failure", errorCode: "model_timeout" }
+  );
+  assert.equal(failedAgain.state.solo.failureCount, 2);
+  assert.ok(failedAgain.state.solo.cooldownUntil >= now + 91 * 60_000);
 });
 
 test("an incoming chat immediately cancels an active solo run", () => {

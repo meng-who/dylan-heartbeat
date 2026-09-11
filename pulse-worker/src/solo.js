@@ -84,6 +84,8 @@ export function completeSolo(input, result = {}, nowMs = Date.now(), timeZone = 
   state.solo.desire = clamp(0.07 + previousDesire * 0.1);
   state.solo.lastSoloAt = nowMs;
   state.solo.cooldownUntil = nowMs + state.solo.cooldownHours * 3_600_000;
+  state.solo.failureCount = 0;
+  state.solo.lastFailureAt = null;
   state.solo.pendingHandoff = mode === "recall" ? "mix" : null;
   state.solo.inProgress = null;
   state.solo.latest = {
@@ -128,7 +130,15 @@ export function cancelSolo(input, claimId, nowMs = Date.now(), timeZone = "Asia/
   }
   const reason = options.reason === "technical_failure" ? "technical_failure" : "user_returned";
   state.solo.inProgress = null;
-  const cooldownMs = reason === "technical_failure" ? 6 * 3_600_000 : 30 * 60_000;
+  let cooldownMs = 30 * 60_000;
+  if (reason === "technical_failure") {
+    const previousFailureAt = Number(state.solo.lastFailureAt);
+    const failureWindowMs = 24 * 3_600_000;
+    const isConsecutive = Number.isFinite(previousFailureAt) && nowMs - previousFailureAt <= failureWindowMs;
+    state.solo.failureCount = isConsecutive ? Math.min(3, (Number(state.solo.failureCount) || 0) + 1) : 1;
+    state.solo.lastFailureAt = nowMs;
+    cooldownMs = [30 * 60_000, 60 * 60_000, 2 * 3_600_000][state.solo.failureCount - 1];
+  }
   const desireGap = reason === "technical_failure" ? 0.08 : 0.03;
   state.solo.cooldownUntil = Math.max(state.solo.cooldownUntil || 0, nowMs + cooldownMs);
   state.solo.desire = Math.min(state.solo.desire, Math.max(0, state.solo.threshold - desireGap));
