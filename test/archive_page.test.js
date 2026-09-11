@@ -20,4 +20,6 @@ test("archive page client script is valid JavaScript", () => {
   assert.ok(script, "archive page script should exist");
   assert.doesNotThrow(() => new Function(script));
   assert.match(html, /自主活动/);
+  assert.match(html, /本次构想（未执行）/);
+  assert.match(html, /拟写内容（未执行）/);
 });

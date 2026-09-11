@@ -363,14 +363,17 @@ OMBRE_MCP_TIMEOUT_MS=12000
 
 先保持 `SOLO_ENABLED=false`，等 Ombre 地址与 Token 填好后再改成 `true`。Token 只放 Render Secret，不要发送到聊天或提交 GitHub。欲望阈值、离开多久才触发、冷却时间和总开关，可在 `/pulse` 身体状态面板里修改。
 
-## 🎧 夜间自主活动（实验功能）
+## 🎧 自主活动（实验功能）
 
 Activity Runtime 独立于普通主动推送：即使 `NIGHT_WAKE_AFTER_MINUTES=999`，它仍会按自己的闲置时间、冷却时间和每日预算判断是否运行。每轮最多调用一次模型、执行一件事，并且不会在同一轮紧接着再运行普通唤醒。
 
-第一版只开放 Spotify 搜索和向一个指定歌单添加歌曲，不开放播放、暂停、音量、资料库删除等工具。先配置但保持关闭：
+Activity 可从 Spotify 与 Ombre 两类动作中每轮选择一件。Spotify 只开放搜索和向指定歌单添加歌曲，不开放播放、暂停、音量、资料库删除等工具。Ombre 会在同一轮模型调用前读取 `feel`、`I` 和最近信件作为回想材料，并只允许写一条候选自我认知或一封 AI 自己的普通未锁信件；不会开放 `promote`、`supersedes` 或 `letter_lock_update`。
+
+先配置但保持关闭：
 
 ```env
 AUTONOMY_ENABLED=false
+AUTONOMY_ACTIONS=spotify,ombre
 AUTONOMY_NIGHT_ONLY=false
 AUTONOMY_CHECK_INTERVAL_MINUTES=15
 AUTONOMY_IDLE_MINUTES=120
@@ -385,15 +388,17 @@ SPOTIFY_PLAYLIST_NAME=歌单显示名称
 ```
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
+- `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre` 或 `spotify,ombre`；未填写时为兼容旧部署，默认只有 `spotify`。
 - `AUTONOMY_CHECK_INTERVAL_MINUTES`：Activity 自己的条件检查频率，默认 15 分钟；检查本身不调用模型。
 - `AUTONOMY_IDLE_MINUTES`：用户离开多久后才允许活动。
 - `AUTONOMY_INTERVAL_MINUTES`：两次模型活动之间的最短间隔。
 - `AUTONOMY_MAX_ACTIONS_PER_DAY`：每天最多占用多少次模型活动预算；模型选择什么都不做也计一次，避免反复询问模型。
 - `SPOTIFY_PLAYLIST_ID`：唯一允许写入的歌单。添加歌曲不需要 Spotify 设备在线，也不需要设备 ID。
+- Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
 
 Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CHECK_INTERVAL_MINUTES` 或普通唤醒阈值影响。它与 Wake/Solo 恰好撞车时只会跳过这一次条件检查，稍后按自己的频率重试，避免同时调用两个模型。
 
-部署这些变量后，先打开 `/admin/activity/spotify-test`。看到 `"ok":true` 代表 Render 已经能直连 MCP，而且找到了所需工具；这个测试只读取工具列表，不调用模型，也不会修改歌单。确认连接与 Archive 正常后，再把 `AUTONOMY_ENABLED` 改成 `true`。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive。
+部署这些变量后，分别打开 `/admin/activity/spotify-test` 和 `/admin/activity/ombre-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具；测试只读取工具列表，不调用模型，也不会读取 Ombre 内容或修改任何数据。确认连接与 Archive 正常后，再把 `AUTONOMY_ENABLED` 改成 `true`。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
 
 ## 🌦️ 天气注入
 

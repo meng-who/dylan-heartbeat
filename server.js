@@ -1314,7 +1314,16 @@ function archivePageHtml() {
       article.append(head);
       if (item.kind === "solo" && item.summary) article.append(node("div", "candidate", item.summary));
       if (item.kind === "activity") {
-        const activityText = [item.summary, item.query && "搜索：" + item.query].filter(Boolean).join("\\n");
+        const wasExecuted = item.status === "success";
+        const summaryLabel = wasExecuted
+          ? "选择原因："
+          : item.status === "kept_private"
+            ? "没有行动："
+            : "本次构想（未执行）：";
+        const activityText = [
+          item.summary && summaryLabel + item.summary,
+          item.query && (wasExecuted ? "搜索：" : "拟搜索：") + item.query
+        ].filter(Boolean).join("\\n");
         if (activityText) article.append(node("div", "candidate", activityText));
       }
       const hasFinal = Boolean(item.final_title || item.final_body);
@@ -1322,7 +1331,12 @@ function archivePageHtml() {
         ? [item.final_title, item.final_body].filter(Boolean).join("\\n")
         : "";
       const candidateMatchesFinal = String(item.candidate || "").trim() === finalText.trim();
-      if (item.candidate && !candidateMatchesFinal) article.append(node("div", "candidate", item.candidate));
+      if (item.candidate && !candidateMatchesFinal) {
+        const candidateText = item.kind === "activity"
+          ? (item.status === "success" ? "已写入内容：" : "拟写内容（未执行）：") + item.candidate
+          : item.candidate;
+        article.append(node("div", "candidate", candidateText));
+      }
       if (hasFinal) {
         article.append(node("div", "final", finalText));
       }
@@ -1449,6 +1463,35 @@ app.get("/admin/activity/spotify-test", { preHandler: basicAuth }, async (req, r
     });
   } catch (error) {
     req.log.error({ event: "spotify_mcp_test_failed", error: error.message });
+    return reply.code(502).send({ ok: false, error: error.message });
+  }
+});
+
+// Read-only connection check: it initializes Ombre MCP and lists tools without reading or writing private data.
+app.get("/admin/activity/ombre-test", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  if (!process.env.OMBRE_MCP_URL) {
+    return reply.code(503).send({ ok: false, error: "OMBRE_MCP_URL 未配置" });
+  }
+  try {
+    const client = new RemoteMcpClient({
+      url: process.env.OMBRE_MCP_URL,
+      token: process.env.OMBRE_MCP_TOKEN,
+      timeoutMs: Number(process.env.OMBRE_MCP_TIMEOUT_MS) || 12_000,
+      clientName: "dylan-ombre-activity-test"
+    });
+    const tools = await client.listTools();
+    const names = tools.map(tool => tool.name);
+    const required = ["feel", "I", "letter_read", "letter_write"];
+    const missing = required.filter(name => !names.includes(name));
+    return reply.code(missing.length ? 502 : 200).send({
+      ok: missing.length === 0,
+      required,
+      missing,
+      available: names
+    });
+  } catch (error) {
+    req.log.error({ event: "ombre_activity_mcp_test_failed", error: error.message });
     return reply.code(502).send({ ok: false, error: error.message });
   }
 });

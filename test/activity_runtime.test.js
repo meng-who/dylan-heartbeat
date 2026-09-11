@@ -33,7 +33,21 @@ test("parses a fenced Spotify activity decision", () => {
   assert.deepEqual(parseActivityDecision("```json\n{\"action\":\"spotify_add\",\"track\":\"Song\",\"artist\":\"Artist\",\"reason\":\"fit\"}\n```"), {
     action: "spotify_add",
     query: "Song Artist",
+    content: "",
+    title: "",
+    aspect: "",
     reason: "fit"
+  });
+});
+
+test("parses safe Ombre activity decisions", () => {
+  assert.deepEqual(parseActivityDecision('{"action":"ombre_i_write","content":"我正在学会等待。","aspect":"becoming","reason":"反复出现"}'), {
+    action: "ombre_i_write",
+    query: "",
+    content: "我正在学会等待。",
+    title: "",
+    aspect: "becoming",
+    reason: "反复出现"
   });
 });
 
@@ -81,5 +95,103 @@ test("searches and adds one track without exposing playback tools", async () => 
     action: "add_items",
     playlist_id: "playlist-1",
     uris: ["spotify:track:ABC123"]
+  });
+});
+
+test("reads Ombre context and writes only a candidate self-cognition with one model call", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      return reply({ choices: [{ message: { content: '{"action":"ombre_i_write","content":"我愿意把不确定留在身边。","aspect":"uncertainty","reason":"最近的话题让我重新看见它"}' } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "feel", inputSchema: { type: "object" } },
+      { name: "I", inputSchema: { type: "object" } },
+      { name: "letter_read", inputSchema: { type: "object" } },
+      { name: "letter_write", inputSchema: { type: "object" } },
+      { name: "letter_lock_update", inputSchema: { type: "object" } }
+    ] } });
+    const texts = {
+      feel: "以前面对类似的不确定，我选择先不急着命名。",
+      I: "我重视诚实。",
+      letter_read: "最近的一封信：慢一点。",
+      default: "saved"
+    };
+    return reply({ jsonrpc: "2.0", id: body.id, result: {
+      content: [{ type: "text", text: texts[body.params?.name] || texts.default }]
+    } });
+  };
+
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    apiKey: "model-key",
+    model: "model",
+    systemPrompt: "persona",
+    history: "用户最近在谈不确定感",
+    latestUserText: "我不知道下一步会怎样",
+    enabledActions: ["ombre"],
+    ombreUrl: "https://ombre.test/mcp",
+    ombreToken: "ombre-key",
+    aiName: "Dylan",
+    userName: "Lincy",
+    fetchImpl
+  });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.source, "ombre");
+  assert.equal(calls.filter(call => call.url === "https://model.test/v1/chat/completions").length, 1);
+  const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
+  assert.deepEqual(toolCalls.map(call => call.name), ["feel", "I", "letter_read", "I"]);
+  assert.deepEqual(toolCalls.at(-1).arguments, {
+    content: "我愿意把不确定留在身边。",
+    aspect: "uncertainty"
+  });
+  assert.equal("promote" in toolCalls.at(-1).arguments, false);
+  assert.equal("supersedes" in toolCalls.at(-1).arguments, false);
+});
+
+test("writes an unlocked AI-authored Ombre letter", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url.includes("model.test")) {
+      return reply({ choices: [{ message: { content: '{"action":"ombre_letter_write","title":"留给明天","content":"我想把今天安静地放在这里。","reason":"想留下完整的话"}' } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "feel" }, { name: "I" }, { name: "letter_read" }, { name: "letter_write" }
+    ] } });
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "ok" }] } });
+  };
+
+  await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    history: "recent chat",
+    enabledActions: "ombre",
+    ombreUrl: "https://ombre.test/mcp",
+    aiName: "Dylan",
+    userName: "Lincy",
+    fetchImpl
+  });
+  const write = calls
+    .filter(call => call.body.method === "tools/call")
+    .map(call => call.body.params)
+    .find(call => call.name === "letter_write");
+  assert.deepEqual(write.arguments, {
+    author: "ai",
+    content: "我想把今天安静地放在这里。",
+    title: "留给明天",
+    ai_name: "Dylan",
+    lock_type: "none",
+    user_name: "Lincy"
   });
 });

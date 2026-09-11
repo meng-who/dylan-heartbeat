@@ -14,7 +14,7 @@ const { isSpecialEventContent } = require("./special_events");
 const { findSimilarRecentPush, getRecentSentPushes } = require("./wake_dedup");
 const { appendWakeArchive, buildWakeArchiveOutcome } = require("./wake_archive");
 const { runSoloCycle } = require("./solo_runtime");
-const { activityGate, runActivityCycle } = require("./activity_runtime");
+const { activityGate, parseEnabledActions, runActivityCycle } = require("./activity_runtime");
 const {
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
@@ -979,7 +979,14 @@ async function runActivityCheck() {
   if (readBooleanEnv("AUTONOMY_NIGHT_ONLY", false) && isDayTime(new Date())) {
     return { ran: false, reason: "outside_activity_window" };
   }
-  const required = ["TARGET_API_URL", "TARGET_API_KEY", "MODEL_NAME", "SPOTIFY_MCP_URL", "SPOTIFY_PLAYLIST_ID"];
+  const enabledActions = parseEnabledActions(process.env.AUTONOMY_ACTIONS);
+  const required = ["TARGET_API_URL", "TARGET_API_KEY", "MODEL_NAME"];
+  if (enabledActions.includes("spotify")) required.push("SPOTIFY_MCP_URL", "SPOTIFY_PLAYLIST_ID");
+  if (enabledActions.includes("ombre")) required.push("OMBRE_MCP_URL", "OMBRE_MCP_TOKEN");
+  if (!enabledActions.length) {
+    console.warn(JSON.stringify({ event: "activity_config_missing", variables: ["AUTONOMY_ACTIONS"] }));
+    return { ran: false, reason: "not_configured" };
+  }
   const missing = required.filter(key => !String(process.env[key] || "").trim());
   if (missing.length) {
     console.warn(JSON.stringify({ event: "activity_config_missing", variables: missing }));
@@ -1030,6 +1037,9 @@ async function runActivityCheck() {
     .slice(-historyLimit)
     .map(message => `${message.role === "user" ? (process.env.USER_DISPLAY_NAME || "用户") : (process.env.AI_DISPLAY_NAME || "AI")}：${normalizeContentToText(message.content)}`)
     .join("\n\n");
+  const latestUserText = [...cleanMessages]
+    .reverse()
+    .find(message => message.role === "user");
   const baseSystem = cleanMessages.find(message => message.role === "system");
   const systemPrompt = baseSystem
     ? normalizeContentToText(baseSystem.content).split("## Memories")[0].trim()
@@ -1045,27 +1055,36 @@ async function runActivityCheck() {
       modelTimeoutMs: WAKE_UPSTREAM_TIMEOUT_MS,
       systemPrompt,
       history,
+      latestUserText: latestUserText ? normalizeContentToText(latestUserText.content) : "",
+      enabledActions,
       playlistName: process.env.SPOTIFY_PLAYLIST_NAME || "自主收藏",
       spotifyUrl: process.env.SPOTIFY_MCP_URL,
       spotifyToken: process.env.SPOTIFY_MCP_TOKEN,
       spotifyTimeoutMs: readPositiveTimeout("SPOTIFY_MCP_TIMEOUT_MS", 20_000),
       playlistId: process.env.SPOTIFY_PLAYLIST_ID,
-      recentTrackUris: nextState.recent_track_uris
+      recentTrackUris: nextState.recent_track_uris,
+      ombreUrl: process.env.OMBRE_MCP_URL,
+      ombreToken: process.env.OMBRE_MCP_TOKEN,
+      ombreTimeoutMs: readPositiveTimeout("OMBRE_MCP_TIMEOUT_MS", 12_000),
+      aiName: process.env.AI_DISPLAY_NAME || "AI",
+      userName: process.env.USER_DISPLAY_NAME || ""
     });
     if (result.trackUri && result.status === "success") {
       nextState.recent_track_uris.push(result.trackUri);
       saveActivityState(nextState);
     }
   } catch (error) {
-    result = { ran: true, status: "failed", reason: error.message || String(error) };
+    result = {
+      ran: true,
+      status: "failed",
+      reason: error.message || String(error),
+      decision: error.activityDecision,
+      source: error.activitySource || "activity"
+    };
   }
 
   if (result.status === "success") {
-    const playlistName = String(process.env.SPOTIFY_PLAYLIST_NAME || "自主收藏").trim();
-    const detail = [
-      `向 Spotify 歌单「${playlistName}」添加了搜索结果「${result.decision?.query || "一首歌"}」`,
-      result.decision?.reason ? `选择原因：${result.decision.reason}` : ""
-    ].filter(Boolean).join("；");
+    const detail = result.timelineSummary || result.decision?.reason || "完成了一次自主活动";
     try {
       const eventResponse = await fetch(GATEWAY_URL, {
         method: "POST",
@@ -1076,7 +1095,7 @@ async function runActivityCheck() {
         body: JSON.stringify({ content: `（${getLocalTimeString()} 自主活动：${detail}）` })
       });
       if (!eventResponse.ok) throw new Error(`Gateway 返回 HTTP ${eventResponse.status}`);
-      console.log(JSON.stringify({ event: "activity_timeline_recorded", source: "spotify" }));
+      console.log(JSON.stringify({ event: "activity_timeline_recorded", source: result.source || "activity" }));
     } catch (error) {
       console.error(JSON.stringify({ event: "activity_timeline_failed", error: error.message || String(error) }));
     }
@@ -1087,10 +1106,13 @@ async function runActivityCheck() {
     local_time: getLocalTimeString(),
     status: result.status,
     model: process.env.MODEL_NAME,
-    source: "spotify",
+    source: result.source || "activity",
     action: result.decision?.action || "activity_cycle",
     summary: result.decision?.reason || "",
     query: result.decision?.query || "",
+    candidate: result.decision?.content || "",
+    title: result.decision?.title || "",
+    aspect: result.decision?.aspect || "",
     track_uri: result.trackUri || "",
     reason: result.reason || ""
   };
