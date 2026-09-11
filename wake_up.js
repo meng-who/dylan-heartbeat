@@ -42,6 +42,7 @@ const DIARY_DIR_NAME = process.env.DIARY_DIR || "diary";
 const DIARY_DIR_PATH = resolveDataPath(DIARY_DIR_NAME, "diary");
 const PUSH_TIMEOUT_MS = readPositiveTimeout("PUSH_TIMEOUT_MS", 15_000);
 const WAKE_UPSTREAM_TIMEOUT_MS = readPositiveTimeout("WAKE_UPSTREAM_TIMEOUT_MS", 300_000);
+let activeBackgroundTask = "";
 
 function readPositiveTimeout(key, fallback) {
   const value = Number(process.env[key]);
@@ -974,7 +975,7 @@ function saveActivityState(state) {
 
 async function runActivityCheck() {
   if (!readBooleanEnv("AUTONOMY_ENABLED", false)) return { ran: false, reason: "scheduler_disabled" };
-  if (readBooleanEnv("AUTONOMY_NIGHT_ONLY", true) && isDayTime(new Date())) {
+  if (readBooleanEnv("AUTONOMY_NIGHT_ONLY", false) && isDayTime(new Date())) {
     return { ran: false, reason: "outside_activity_window" };
   }
   const required = ["TARGET_API_URL", "TARGET_API_KEY", "MODEL_NAME", "SPOTIFY_MCP_URL", "SPOTIFY_PLAYLIST_ID"];
@@ -1091,6 +1092,10 @@ function getCheckIntervalMs() {
   return getCheckIntervalMinutes(new Date()) * 60 * 1000;
 }
 
+function getActivityCheckIntervalMs() {
+  return readNumberEnv("AUTONOMY_CHECK_INTERVAL_MINUTES", 15, { min: 1, max: 1440 }) * 60 * 1000;
+}
+
 async function scheduleNextCheck() {
   try {
     // 发送心跳
@@ -1105,23 +1110,27 @@ async function scheduleNextCheck() {
     } catch (error) {
       console.error("心跳发送失败:", error.message);
     }
-    let soloResult = { ran: false, reason: "not_checked" };
-    try {
-      soloResult = await runSoloCheck();
-    } catch (error) {
-      console.error("Solo 检查失败，继续普通唤醒:", error.message);
-    }
-    let activityResult = { ran: false, reason: "not_checked" };
-    if (!soloResult.ran && !soloResult.cancelled && soloResult.reason !== "already_running") {
+    if (activeBackgroundTask) {
+      console.log(JSON.stringify({
+        event: "background_check_skipped",
+        scheduler: "wake",
+        active_task: activeBackgroundTask
+      }));
+    } else {
+      activeBackgroundTask = "wake";
       try {
-        activityResult = await runActivityCheck();
-      } catch (error) {
-        console.error("Activity 检查失败，继续普通唤醒:", error.message);
+        let soloResult = { ran: false, reason: "not_checked" };
+        try {
+          soloResult = await runSoloCheck();
+        } catch (error) {
+          console.error("Solo 检查失败，继续普通唤醒:", error.message);
+        }
+        if (!soloResult.ran && !soloResult.cancelled && soloResult.reason !== "already_running") {
+          await runWakeUp();
+        }
+      } finally {
+        activeBackgroundTask = "";
       }
-    }
-    // 每轮最多运行一个后台模型任务，避免 Solo、Activity 和普通唤醒连续扣费。
-    if (!soloResult.ran && !soloResult.cancelled && soloResult.reason !== "already_running" && !activityResult.ran) {
-      await runWakeUp();
     }
   } catch (err) {
     console.error("唤醒检查出错:", err);
@@ -1129,9 +1138,32 @@ async function scheduleNextCheck() {
   setTimeout(scheduleNextCheck, getCheckIntervalMs());
 }
 
+async function scheduleActivityCheck() {
+  try {
+    if (activeBackgroundTask) {
+      console.log(JSON.stringify({
+        event: "background_check_skipped",
+        scheduler: "activity",
+        active_task: activeBackgroundTask
+      }));
+    } else {
+      activeBackgroundTask = "activity";
+      try {
+        await runActivityCheck();
+      } finally {
+        activeBackgroundTask = "";
+      }
+    }
+  } catch (error) {
+    console.error("Activity 检查出错:", error);
+  }
+  setTimeout(scheduleActivityCheck, getActivityCheckIntervalMs());
+}
+
 // 潮水记得第一次没过礁石的时间。之后每一次涨落，都是同一片海在确认边界。
 // 启动第一次检查（延迟10秒）
 setTimeout(scheduleNextCheck, 10_000);
+setTimeout(scheduleActivityCheck, 30_000);
 
 console.log("\n==================================");
 console.log("Dylan Heartbeat Runtime 已启动（动态间隔）");
