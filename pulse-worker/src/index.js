@@ -344,7 +344,10 @@ async function handleSoloCancelApi(request, env) {
   const body = await request.json().catch(() => ({}));
   const now = Date.now();
   const stored = await loadState(env.DB, profileId(env), now);
-  const result = cancelSolo(stored, body?.claimId, now, env.TIME_ZONE || "Asia/Shanghai");
+  const result = cancelSolo(stored, body?.claimId, now, env.TIME_ZONE || "Asia/Shanghai", {
+    reason: body?.reason,
+    errorCode: body?.errorCode
+  });
   await saveState(env.DB, profileId(env), result.state, result.events);
   return json({ cancelled: result.cancelled, reason: result.reason, state: publicSnapshot(result.state) }, result.cancelled ? 200 : 409);
 }

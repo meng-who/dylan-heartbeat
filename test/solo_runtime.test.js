@@ -120,3 +120,68 @@ test("falls back from recall to fantasy when Ombre has no usable memory", async 
   assert.equal(result.recallUsed, false);
   assert.match(modelRequest.messages[0].content, /本次固定模式：fantasy/);
 });
+
+test("retries once when the Solo model returns malformed JSON", async () => {
+  let modelCalls = 0;
+  let retryRequest;
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (String(url).endsWith("/api/solo/claim")) {
+      return Response.json({ claimed: true, claim: {
+        id: "retry-claim", startedAt: 1000, mode: "fantasy", chord: "兴奋上扬", desire: 0.8
+      } });
+    }
+    if (String(url) === "https://model.example.com/chat") {
+      modelCalls += 1;
+      if (modelCalls === 1) return Response.json({ choices: [{ message: { content: "这不是 JSON" } }] });
+      retryRequest = body;
+      return Response.json({ choices: [{ message: { content: JSON.stringify({
+        mode: "fantasy", intensity: 0.7, summary: "修复后的摘要", narrative: "修复后的完整经过。",
+        notify: { send: false, title: "", body: "" }
+      }) } }] });
+    }
+    if (String(url).endsWith("/api/solo/complete")) return Response.json({ completed: true });
+    throw new Error(`unexpected URL ${url}`);
+  };
+
+  const result = await runSoloCycle({
+    pulseBaseUrl: "https://pulse.example.com", pulseClientKey: "p",
+    apiUrl: "https://model.example.com/chat", apiKey: "k", model: "m",
+    lastUserAt: 0, messages: [], systemPrompt: "AI", getLatestUserAt: async () => 0,
+    fetchImpl, logger: { warn() {} }
+  });
+
+  assert.equal(result.ran, true);
+  assert.equal(modelCalls, 2);
+  assert.match(retryRequest.messages.at(-1).content, /完整、合法的 JSON/);
+});
+
+test("marks persistent model format failures as technical instead of user return", async () => {
+  let cancelBody;
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (String(url).endsWith("/api/solo/claim")) {
+      return Response.json({ claimed: true, claim: {
+        id: "failed-claim", startedAt: 1000, mode: "fantasy", chord: "兴奋上扬", desire: 0.8
+      } });
+    }
+    if (String(url) === "https://model.example.com/chat") {
+      return Response.json({ choices: [{ message: { content: "始终不是 JSON" } }] });
+    }
+    if (String(url).endsWith("/api/solo/cancel")) {
+      cancelBody = body;
+      return Response.json({ cancelled: true });
+    }
+    throw new Error(`unexpected URL ${url}`);
+  };
+
+  await assert.rejects(() => runSoloCycle({
+    pulseBaseUrl: "https://pulse.example.com", pulseClientKey: "p",
+    apiUrl: "https://model.example.com/chat", apiKey: "k", model: "m",
+    lastUserAt: 0, messages: [], systemPrompt: "AI", getLatestUserAt: async () => 0,
+    fetchImpl, logger: { warn() {} }
+  }));
+
+  assert.equal(cancelBody.reason, "technical_failure");
+  assert.equal(cancelBody.errorCode, "invalid_model_output");
+});

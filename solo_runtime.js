@@ -29,7 +29,15 @@ function completeSolo(options) {
 }
 
 function cancelSolo(options) {
-  return pulseRequest({ ...options, path: "/api/solo/cancel", body: { claimId: options.claimId } });
+  return pulseRequest({
+    ...options,
+    path: "/api/solo/cancel",
+    body: {
+      claimId: options.claimId,
+      reason: options.reason || "user_returned",
+      errorCode: options.errorCode || ""
+    }
+  });
 }
 
 function contentText(content) {
@@ -119,6 +127,39 @@ function parseSoloResult(text, expectedMode) {
   };
 }
 
+function classifySoloFailure(error) {
+  const message = String(error?.message || error || "");
+  if (/JSON|没有返回对象|缺少摘要或经过/i.test(message)) return "invalid_model_output";
+  if (/timeout|timed out|abort/i.test(message)) return "model_timeout";
+  if (/Solo 模型请求失败|fetch failed|ECONN|socket|network/i.test(message)) return "model_request_failed";
+  if (/Pulse Solo \/api\/solo\/complete/i.test(message)) return "pulse_write_failed";
+  return "technical_failure";
+}
+
+async function requestAndParseSoloResult(options) {
+  let messages = options.messages;
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    let raw = "";
+    try {
+      raw = await requestSoloModel({ ...options, messages });
+      return parseSoloResult(raw, options.expectedMode);
+    } catch (error) {
+      lastError = error;
+      if (attempt === 2) break;
+      options.logger?.warn?.(JSON.stringify({
+        event: "solo_model_retry",
+        reason: classifySoloFailure(error)
+      }));
+      const correction = "上一条 Solo 输出未能通过系统校验。请重新完成同一次体验，只输出一个完整、合法的 JSON 对象；不要 Markdown、代码围栏或解释，并确保 summary、narrative、notify 字段齐全。";
+      messages = raw
+        ? [...messages, { role: "assistant", content: String(raw).slice(0, 4000) }, { role: "user", content: correction }]
+        : [...messages, { role: "user", content: correction }];
+    }
+  }
+  throw lastError;
+}
+
 function shouldFallback(status, text = "") {
   if ([408, 425, 429].includes(status) || status >= 500) return true;
   return [400, 404].includes(status) && /model|模型/i.test(text) && /not found|unavailable|不存在|不可用/i.test(text);
@@ -180,20 +221,21 @@ async function runSoloCycle(options) {
   try {
     const history = formatRecentHistory(options.messages);
     const modelMessages = buildSoloMessages({ systemPrompt: options.systemPrompt, history, claim, recallText, mode });
-    const raw = await requestSoloModel({
+    const result = await requestAndParseSoloResult({
       apiUrl: options.apiUrl,
       apiKey: options.apiKey,
       model: options.model,
       backupModel: options.backupModel,
       messages: modelMessages,
+      expectedMode: mode,
       timeoutMs: options.modelTimeoutMs,
-      fetchImpl: options.fetchImpl || fetch
+      fetchImpl: options.fetchImpl || fetch,
+      logger: options.logger
     });
-    const result = parseSoloResult(raw, mode);
 
     const latestUserAt = Number(await options.getLatestUserAt?.());
     if (Number.isFinite(latestUserAt) && latestUserAt > claim.startedAt) {
-      try { await cancelSolo({ ...pulseOptions, claimId: claim.id }); } catch {}
+      try { await cancelSolo({ ...pulseOptions, claimId: claim.id, reason: "user_returned" }); } catch {}
       return { ran: false, reason: "user_returned", cancelled: true };
     }
 
@@ -236,7 +278,15 @@ async function runSoloCycle(options) {
     }
     return { ran: true, reason: "completed", mode, recallUsed, notifyWanted: result.notify.send, notified, archived };
   } catch (error) {
-    try { await cancelSolo({ ...pulseOptions, claimId: claim.id }); } catch {}
+    const errorCode = classifySoloFailure(error);
+    try {
+      await cancelSolo({
+        ...pulseOptions,
+        claimId: claim.id,
+        reason: "technical_failure",
+        errorCode
+      });
+    } catch {}
     throw error;
   }
 }
@@ -244,6 +294,7 @@ async function runSoloCycle(options) {
 module.exports = {
   buildSoloMessages,
   cancelSolo,
+  classifySoloFailure,
   claimSolo,
   completeSolo,
   formatRecentHistory,

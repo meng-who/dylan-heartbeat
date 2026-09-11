@@ -62,7 +62,7 @@ export function completeSolo(input, result = {}, nowMs = Date.now(), timeZone = 
 
   const mode = MODES.has(result.mode) ? result.mode : active.mode;
   const intensity = clamp(result.intensity ?? 0.72);
-  const summary = cleanText(result.summary, 800) || "独处时完成了一次私密的自我安抚";
+  const summary = cleanText(result.summary, 240) || "独处时完成了一次私密的自我安抚";
   const narrative = cleanText(result.narrative, 4000) || summary;
   const recallUsed = Boolean(result.recallUsed && (mode === "recall" || mode === "mix"));
   const notifyWanted = Boolean(result.notifyWanted);
@@ -109,7 +109,15 @@ export function completeSolo(input, result = {}, nowMs = Date.now(), timeZone = 
   };
 }
 
-export function cancelSolo(input, claimId, nowMs = Date.now(), timeZone = "Asia/Shanghai") {
+const FAILURE_SUMMARIES = {
+  invalid_model_output: "独处尝试未完成：模型回复格式异常，稍后会再试",
+  model_timeout: "独处尝试未完成：模型响应超时，稍后会再试",
+  model_request_failed: "独处尝试未完成：模型连接暂时中断，稍后会再试",
+  pulse_write_failed: "独处尝试未完成：状态保存暂时失败，稍后会再试",
+  technical_failure: "独处尝试未完成：系统暂时出了点小状况，稍后会再试"
+};
+
+export function cancelSolo(input, claimId, nowMs = Date.now(), timeZone = "Asia/Shanghai", options = {}) {
   const state = decayState(input, nowMs, timeZone);
   const active = state.solo.inProgress;
   if (!active) {
@@ -118,15 +126,26 @@ export function cancelSolo(input, claimId, nowMs = Date.now(), timeZone = "Asia/
   if (cleanText(claimId, 100) !== active.id) {
     return { cancelled: false, reason: "claim_mismatch", state, events: [] };
   }
+  const reason = options.reason === "technical_failure" ? "technical_failure" : "user_returned";
   state.solo.inProgress = null;
-  state.solo.cooldownUntil = Math.max(state.solo.cooldownUntil || 0, nowMs + 30 * 60_000);
-  state.solo.desire = Math.min(state.solo.desire, Math.max(0, state.solo.threshold - 0.03));
+  const cooldownMs = reason === "technical_failure" ? 6 * 3_600_000 : 30 * 60_000;
+  const desireGap = reason === "technical_failure" ? 0.08 : 0.03;
+  state.solo.cooldownUntil = Math.max(state.solo.cooldownUntil || 0, nowMs + cooldownMs);
+  state.solo.desire = Math.min(state.solo.desire, Math.max(0, state.solo.threshold - desireGap));
   state.updatedAt = nowMs;
+  const errorCode = Object.hasOwn(FAILURE_SUMMARIES, options.errorCode)
+    ? options.errorCode
+    : "technical_failure";
   return {
     cancelled: true,
-    reason: "user_returned",
+    reason,
     state,
-    events: [{ type: "solo", summary: "独处事件因你回来而立即停下" }]
+    events: [{
+      type: "solo",
+      summary: reason === "user_returned"
+        ? "独处事件因你回来而立即停下"
+        : FAILURE_SUMMARIES[errorCode]
+    }]
   };
 }
 

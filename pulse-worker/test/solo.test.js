@@ -59,25 +59,6 @@ test("completing solo leaves a bodily afterglow, cooldown and private record", (
   assert.match(completed.events[0].summary, /选择告诉你/);
 });
 
-test("stores a longer Solo summary together with the full narrative", () => {
-  const now = Date.UTC(2026, 8, 4, 12, 0, 0);
-  const state = createDefaultState(now);
-  state.solo.desire = 0.9;
-  const claimed = claimSolo(state, {
-    lastUserAt: now - 3 * 3_600_000,
-    claimId: "solo-long",
-    randomValue: 0.6
-  }, now);
-  const completed = completeSolo(claimed.state, {
-    claimId: "solo-long",
-    mode: "fantasy",
-    summary: "摘".repeat(500),
-    narrative: "经过".repeat(500)
-  }, now + 1_000);
-  assert.equal(completed.state.solo.latest.summary.length, 500);
-  assert.equal(completed.state.solo.latest.narrative.length, 1000);
-});
-
 test("legacy solo afterglow is shown with the new label", () => {
   const now = Date.UTC(2026, 8, 4, 12, 0, 0);
   const state = createDefaultState(now);
@@ -98,6 +79,29 @@ test("a user return cancels an active solo run", () => {
   assert.equal(cancelled.cancelled, true);
   assert.equal(cancelled.state.solo.inProgress, null);
   assert.match(cancelled.events[0].summary, /立即停下/);
+});
+
+test("a technical Solo failure has its own event and a longer retry cooldown", () => {
+  const now = Date.UTC(2026, 8, 4, 12, 0, 0);
+  const state = createDefaultState(now);
+  state.solo.desire = 0.9;
+  const claimed = claimSolo(state, {
+    lastUserAt: now - 3 * 3_600_000,
+    claimId: "solo-error",
+    randomValue: 0.5
+  }, now);
+  const cancelled = cancelSolo(
+    claimed.state,
+    "solo-error",
+    now + 10_000,
+    "Asia/Shanghai",
+    { reason: "technical_failure", errorCode: "invalid_model_output" }
+  );
+
+  assert.equal(cancelled.reason, "technical_failure");
+  assert.doesNotMatch(cancelled.events[0].summary, /你回来/);
+  assert.match(cancelled.events[0].summary, /模型回复格式异常/);
+  assert.ok(cancelled.state.solo.cooldownUntil >= now + 6 * 3_600_000);
 });
 
 test("an incoming chat immediately cancels an active solo run", () => {
