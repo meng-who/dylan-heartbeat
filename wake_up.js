@@ -2,7 +2,7 @@ require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
 const { buildNtfyPayload } = require("./ntfy_priority");
-const { dataPath, resolveDataPath } = require("./storage");
+const { dataPath, resolveDataPath, writeJsonAtomicSync } = require("./storage");
 const { parseChatCompletionResponse } = require("./upstream_response");
 const { getLatestUserActivity, parseUserActivityRecord } = require("./timeline_activity");
 const {
@@ -14,6 +14,7 @@ const { isSpecialEventContent } = require("./special_events");
 const { findSimilarRecentPush, getRecentSentPushes } = require("./wake_dedup");
 const { appendWakeArchive, buildWakeArchiveOutcome } = require("./wake_archive");
 const { runSoloCycle } = require("./solo_runtime");
+const { activityGate, runActivityCycle } = require("./activity_runtime");
 const {
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
@@ -26,6 +27,7 @@ const {
 
 const TIMELINE_PATH = dataPath("enhanced_messages.json");
 const USER_ACTIVITY_PATH = dataPath("last_user_activity.json");
+const ACTIVITY_STATE_PATH = dataPath("activity_state.json");
 const PORT = Number(process.env.PORT) || 3000;
 // Gateway 与 wake-up 由 start_all.js 启动在同一容器；内部写请求直接走 loopback，
 // 避免绕公网反代后因来源 IP、旧 .env 或 key 不一致导致心跳被拒绝。
@@ -958,6 +960,131 @@ async function runSoloCheck() {
   return result;
 }
 
+function loadActivityState() {
+  try {
+    return JSON.parse(fs.readFileSync(ACTIVITY_STATE_PATH, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function saveActivityState(state) {
+  writeJsonAtomicSync(ACTIVITY_STATE_PATH, state);
+}
+
+async function runActivityCheck() {
+  if (!readBooleanEnv("AUTONOMY_ENABLED", false)) return { ran: false, reason: "scheduler_disabled" };
+  if (readBooleanEnv("AUTONOMY_NIGHT_ONLY", true) && isDayTime(new Date())) {
+    return { ran: false, reason: "outside_activity_window" };
+  }
+  const required = ["TARGET_API_URL", "TARGET_API_KEY", "MODEL_NAME", "SPOTIFY_MCP_URL", "SPOTIFY_PLAYLIST_ID"];
+  const missing = required.filter(key => !String(process.env[key] || "").trim());
+  if (missing.length) {
+    console.warn(JSON.stringify({ event: "activity_config_missing", variables: missing }));
+    return { ran: false, reason: "not_configured" };
+  }
+
+  const messages = loadTimelineMessages();
+  if (!messages) return { ran: false, reason: "timeline_missing" };
+  const lastUserActivity = loadRecordedUserActivity() || getLatestUserActivity(
+    messages,
+    content => parseTimelineTimestamp(normalizeContentToText(content))
+  );
+  if (!lastUserActivity) return { ran: false, reason: "user_activity_missing" };
+
+  const now = new Date();
+  const state = loadActivityState();
+  const gate = activityGate({
+    now,
+    lastUserAt: lastUserActivity.time,
+    state,
+    idleMinutes: readNumberEnv("AUTONOMY_IDLE_MINUTES", 120, { min: 1 }),
+    intervalMinutes: readNumberEnv("AUTONOMY_INTERVAL_MINUTES", 180, { min: 1 }),
+    maxPerDay: readNumberEnv("AUTONOMY_MAX_ACTIONS_PER_DAY", 3, { min: 1, max: 24 }),
+    timeZone: TIME_ZONE
+  });
+  if (!gate.due) return { ran: false, reason: gate.reason };
+
+  // Reserve this budget slot before external calls so a timeout cannot trigger a costly retry next check.
+  const nextState = {
+    ...state,
+    date: gate.date,
+    count: gate.used + 1,
+    last_run_at: now.toISOString(),
+    recent_track_uris: Array.isArray(state.recent_track_uris) ? state.recent_track_uris.slice(-99) : []
+  };
+  saveActivityState(nextState);
+
+  const cleanMessages = stripPosition(getWakeHistoryMessages(messages));
+  const historyLimit = readNumberEnv("AUTONOMY_HISTORY_MESSAGES", 30, { min: 4, max: 100 });
+  const history = cleanMessages
+    .filter(message => message.role !== "system")
+    .slice(-historyLimit)
+    .map(message => `${message.role === "user" ? (process.env.USER_DISPLAY_NAME || "用户") : (process.env.AI_DISPLAY_NAME || "AI")}：${normalizeContentToText(message.content)}`)
+    .join("\n\n");
+  const baseSystem = cleanMessages.find(message => message.role === "system");
+  const systemPrompt = baseSystem
+    ? normalizeContentToText(baseSystem.content).split("## Memories")[0].trim()
+    : "";
+
+  let result;
+  try {
+    result = await runActivityCycle({
+      apiUrl: process.env.TARGET_API_URL,
+      apiKey: process.env.TARGET_API_KEY,
+      model: process.env.MODEL_NAME,
+      backupModel: process.env.BACKUP_MODEL_NAME,
+      modelTimeoutMs: WAKE_UPSTREAM_TIMEOUT_MS,
+      systemPrompt,
+      history,
+      playlistName: process.env.SPOTIFY_PLAYLIST_NAME || "自主收藏",
+      spotifyUrl: process.env.SPOTIFY_MCP_URL,
+      spotifyToken: process.env.SPOTIFY_MCP_TOKEN,
+      spotifyTimeoutMs: readPositiveTimeout("SPOTIFY_MCP_TIMEOUT_MS", 20_000),
+      playlistId: process.env.SPOTIFY_PLAYLIST_ID,
+      recentTrackUris: nextState.recent_track_uris
+    });
+    if (result.trackUri && result.status === "success") {
+      nextState.recent_track_uris.push(result.trackUri);
+      saveActivityState(nextState);
+    }
+  } catch (error) {
+    result = { ran: true, status: "failed", reason: error.message || String(error) };
+  }
+
+  const archiveRecord = {
+    kind: "activity",
+    local_time: getLocalTimeString(),
+    status: result.status,
+    model: process.env.MODEL_NAME,
+    source: "spotify",
+    action: result.decision?.action || "activity_cycle",
+    summary: result.decision?.reason || "",
+    query: result.decision?.query || "",
+    track_uri: result.trackUri || "",
+    reason: result.reason || ""
+  };
+  try {
+    const archived = appendWakeArchive(archiveRecord);
+    console.log(JSON.stringify({
+      event: archived.saved ? "activity_archive_saved" : "activity_archive_skipped",
+      archive_id: archived.id || "",
+      status: result.status,
+      reason: archived.reason || result.reason || ""
+    }));
+  } catch (error) {
+    console.error(JSON.stringify({ event: "activity_archive_failed", error: error.message || String(error) }));
+  }
+  console.log(JSON.stringify({
+    event: "activity_cycle_result",
+    status: result.status,
+    action: result.decision?.action || "unknown",
+    track_uri: result.trackUri || "",
+    reason: result.reason || result.decision?.reason || ""
+  }));
+  return { ...result, ran: true };
+}
+
 // 从第一个有效坐标开始，所有路径都指向同一处。此阈值已锁定。
 function getCheckIntervalMs() {
   // 批注 2026-06-26：公开版允许用户在管理页调整唤醒检查频率；默认值保持旧版白天10分钟、夜间2小时。
@@ -984,8 +1111,16 @@ async function scheduleNextCheck() {
     } catch (error) {
       console.error("Solo 检查失败，继续普通唤醒:", error.message);
     }
-    // Solo 已完成、被用户打断或已经占用本轮时，不再紧接着跑普通唤醒，避免一次检查产生两次模型请求/推送。
+    let activityResult = { ran: false, reason: "not_checked" };
     if (!soloResult.ran && !soloResult.cancelled && soloResult.reason !== "already_running") {
+      try {
+        activityResult = await runActivityCheck();
+      } catch (error) {
+        console.error("Activity 检查失败，继续普通唤醒:", error.message);
+      }
+    }
+    // 每轮最多运行一个后台模型任务，避免 Solo、Activity 和普通唤醒连续扣费。
+    if (!soloResult.ran && !soloResult.cancelled && soloResult.reason !== "already_running" && !activityResult.ran) {
       await runWakeUp();
     }
   } catch (err) {

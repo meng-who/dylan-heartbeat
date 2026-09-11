@@ -31,6 +31,7 @@ const {
   isToolFollowUp,
   requestTraceId
 } = require("./http_resilience");
+const { RemoteMcpClient } = require("./remote_mcp_client");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -1223,7 +1224,7 @@ function archivePageHtml() {
     <header>
       <div>
         <h1>Dylan Archive</h1>
-        <p>自动唤醒与 Solo 独处记录。档案在磁盘中始终加密保存。</p>
+        <p>自动唤醒、Solo 与自主活动记录。档案在磁盘中始终加密保存。</p>
       </div>
       <div class="actions">
         <a class="button" href="/admin">返回管理页</a>
@@ -1236,6 +1237,7 @@ function archivePageHtml() {
         <option value="">全部类型</option>
         <option value="wake">主动推送</option>
         <option value="solo">Solo</option>
+        <option value="activity">自主活动</option>
       </select>
       <select id="status" aria-label="筛选结果">
         <option value="">全部结果</option>
@@ -1248,6 +1250,9 @@ function archivePageHtml() {
         <option value="empty">空回复</option>
         <option value="not_sent">未发送</option>
         <option value="kept_private">留在心里</option>
+        <option value="success">行动成功</option>
+        <option value="failed">行动失败</option>
+        <option value="skipped">已跳过</option>
       </select>
       <button id="refresh" type="button">刷新</button>
     </div>
@@ -1259,7 +1264,8 @@ function archivePageHtml() {
       sent: "已发送", duplicate: "重复拦截", rejected: "内容拦截",
       push_failed: "推送失败", no_action: "AI 选择不发送",
       diary_only: "只写日记", empty: "空回复", not_sent: "未发送",
-      kept_private: "留在心里"
+      kept_private: "留在心里", success: "行动成功",
+      failed: "行动失败", skipped: "已跳过"
     };
     const query = document.getElementById("query");
     const kind = document.getElementById("kind");
@@ -1300,12 +1306,17 @@ function archivePageHtml() {
     function renderRecord(item) {
       const article = node("article", "record");
       const head = node("div", "record-head");
-      head.append(node("span", "kind", item.kind === "solo" ? "Solo" : "主动推送"));
+      const kindLabels = { wake: "主动推送", solo: "Solo", activity: "自主活动" };
+      head.append(node("span", "kind", kindLabels[item.kind || "wake"] || item.kind));
       head.append(node("span", "status status-" + item.status, labels[item.status] || item.status));
       head.append(node("time", "", item.local_time || item.created_at || "未知时间"));
       head.append(node("span", "model", item.model || "未知模型"));
       article.append(head);
       if (item.kind === "solo" && item.summary) article.append(node("div", "candidate", item.summary));
+      if (item.kind === "activity") {
+        const activityText = [item.summary, item.query && "搜索：" + item.query].filter(Boolean).join("\n");
+        if (activityText) article.append(node("div", "candidate", activityText));
+      }
       const hasFinal = Boolean(item.final_title || item.final_body);
       const finalText = hasFinal
         ? [item.final_title, item.final_body].filter(Boolean).join("\\n")
@@ -1325,6 +1336,9 @@ function archivePageHtml() {
       if (item.reason) details.push("原因：" + item.reason);
       if (Array.isArray(item.repairs) && item.repairs.length) details.push("修复：" + item.repairs.join("、"));
       if (item.used_backup) details.push("使用备用模型");
+      if (item.source) details.push("来源：" + item.source);
+      if (item.action) details.push("动作：" + item.action);
+      if (item.track_uri) details.push("歌曲：" + item.track_uri);
       if (details.length) article.append(node("div", "meta", details.join(" · ")));
       const remove = node("button", "delete", "删除此条");
       remove.type = "button";
@@ -1408,6 +1422,35 @@ app.get("/admin/archive/export", { preHandler: basicAuth }, async (req, reply) =
     .header("Content-Disposition", `attachment; filename="wake-archive-encrypted-${date}.jsonl"`)
     .type("application/x-ndjson")
     .send(content);
+});
+
+// Read-only connection check: it initializes MCP and lists tools, but never calls a Spotify tool.
+app.get("/admin/activity/spotify-test", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  if (!process.env.SPOTIFY_MCP_URL) {
+    return reply.code(503).send({ ok: false, error: "SPOTIFY_MCP_URL 未配置" });
+  }
+  try {
+    const client = new RemoteMcpClient({
+      url: process.env.SPOTIFY_MCP_URL,
+      token: process.env.SPOTIFY_MCP_TOKEN,
+      timeoutMs: Number(process.env.SPOTIFY_MCP_TIMEOUT_MS) || 20_000,
+      clientName: "dylan-spotify-test"
+    });
+    const tools = await client.listTools();
+    const names = tools.map(tool => tool.name);
+    const required = ["spotify_search", "spotify_playlist"];
+    const missing = required.filter(name => !names.includes(name));
+    return reply.code(missing.length ? 502 : 200).send({
+      ok: missing.length === 0,
+      required,
+      missing,
+      available: names
+    });
+  } catch (error) {
+    req.log.error({ event: "spotify_mcp_test_failed", error: error.message });
+    return reply.code(502).send({ ok: false, error: error.message });
+  }
 });
 
 // ========================

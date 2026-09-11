@@ -139,7 +139,11 @@ function readWakeArchive(options = {}) {
       record.status,
       record.mode,
       record.summary,
-      record.narrative
+      record.narrative,
+      record.source,
+      record.action,
+      record.query,
+      record.track_uri
     ].some(value => String(value || "").toLowerCase().includes(query));
   }).slice(0, limit);
 

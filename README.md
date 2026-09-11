@@ -363,6 +363,34 @@ OMBRE_MCP_TIMEOUT_MS=12000
 
 先保持 `SOLO_ENABLED=false`，等 Ombre 地址与 Token 填好后再改成 `true`。Token 只放 Render Secret，不要发送到聊天或提交 GitHub。欲望阈值、离开多久才触发、冷却时间和总开关，可在 `/pulse` 身体状态面板里修改。
 
+## 🎧 夜间自主活动（实验功能）
+
+Activity Runtime 独立于普通主动推送：即使 `NIGHT_WAKE_AFTER_MINUTES=999`，它仍会按自己的闲置时间、冷却时间和每日预算判断是否运行。每轮最多调用一次模型、执行一件事，并且不会在同一轮紧接着再运行普通唤醒。
+
+第一版只开放 Spotify 搜索和向一个指定歌单添加歌曲，不开放播放、暂停、音量、资料库删除等工具。先配置但保持关闭：
+
+```env
+AUTONOMY_ENABLED=false
+AUTONOMY_NIGHT_ONLY=true
+AUTONOMY_IDLE_MINUTES=120
+AUTONOMY_INTERVAL_MINUTES=180
+AUTONOMY_MAX_ACTIONS_PER_DAY=3
+AUTONOMY_HISTORY_MESSAGES=30
+SPOTIFY_MCP_URL=https://你的-spotify-mcp.example.com/mcp
+SPOTIFY_MCP_TOKEN=你的Bearer-Token
+SPOTIFY_MCP_TIMEOUT_MS=20000
+SPOTIFY_PLAYLIST_ID=目标歌单ID
+SPOTIFY_PLAYLIST_NAME=歌单显示名称
+```
+
+- `AUTONOMY_NIGHT_ONLY=true`：只在 `WAKE_DAY_START_HOUR` 到 `WAKE_DAY_END_HOUR` 之外运行。
+- `AUTONOMY_IDLE_MINUTES`：用户离开多久后才允许活动。
+- `AUTONOMY_INTERVAL_MINUTES`：两次模型活动之间的最短间隔。
+- `AUTONOMY_MAX_ACTIONS_PER_DAY`：每天最多占用多少次模型活动预算；模型选择什么都不做也计一次，避免反复询问模型。
+- `SPOTIFY_PLAYLIST_ID`：唯一允许写入的歌单。添加歌曲不需要 Spotify 设备在线，也不需要设备 ID。
+
+部署这些变量后，先打开 `/admin/activity/spotify-test`。看到 `"ok":true` 代表 Render 已经能直连 MCP，而且找到了所需工具；这个测试只读取工具列表，不调用模型，也不会修改歌单。确认连接与 Archive 正常后，再把 `AUTONOMY_ENABLED` 改成 `true`。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive。
+
 ## 🌦️ 天气注入
 
 Dylan Heartbeat 可以在自动唤醒时，把当前天气作为一小段背景信息交给模型。天气使用 [Open-Meteo](https://open-meteo.com/) 免费接口，不需要 API Key。
@@ -461,7 +489,7 @@ DIARY_ENABLED=false
 
 ## 🔒 私密推送档案
 
-配置 `WAKE_ARCHIVE_KEY` 后，每次自动唤醒都会把模型候选内容和最终结果写入 `DATA_DIR/wake_archive.enc.jsonl`。已发送、重复拦截、内容拦截、推送失败和 AI 主动静默都会保留，因此即使某条消息没有到达 Bark，也能在档案中确认发生了什么。
+配置 `WAKE_ARCHIVE_KEY` 后，每次自动唤醒、Solo 和自主活动都会把候选内容与最终结果写入 `DATA_DIR/wake_archive.enc.jsonl`。已发送、重复拦截、内容拦截、推送失败、AI 主动静默，以及 Activity 的成功或失败都会保留，因此即使某条消息没有到达 Bark，也能在档案中确认发生了什么。
 
 ```env
 WAKE_ARCHIVE_KEY=32字节Base64URL密钥
