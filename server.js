@@ -1314,7 +1314,7 @@ function archivePageHtml() {
       article.append(head);
       if (item.kind === "solo" && item.summary) article.append(node("div", "candidate", item.summary));
       if (item.kind === "activity") {
-        const activityText = [item.summary, item.query && "搜索：" + item.query].filter(Boolean).join("\n");
+        const activityText = [item.summary, item.query && "搜索：" + item.query].filter(Boolean).join("\\n");
         if (activityText) article.append(node("div", "candidate", activityText));
       }
       const hasFinal = Boolean(item.final_title || item.final_body);
