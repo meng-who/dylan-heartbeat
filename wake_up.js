@@ -1015,13 +1015,14 @@ async function runActivityCheck() {
 
   const now = new Date();
   const state = loadActivityState();
+  const maxPerDay = readNumberEnv("AUTONOMY_MAX_ACTIONS_PER_DAY", 3, { min: 1, max: 24 });
   const gate = activityGate({
     now,
     lastUserAt: lastUserActivity.time,
     state,
     idleMinutes: readNumberEnv("AUTONOMY_IDLE_MINUTES", 120, { min: 1 }),
     intervalMinutes: readNumberEnv("AUTONOMY_INTERVAL_MINUTES", 180, { min: 1 }),
-    maxPerDay: readNumberEnv("AUTONOMY_MAX_ACTIONS_PER_DAY", 3, { min: 1, max: 24 }),
+    maxPerDay,
     timeZone: TIME_ZONE
   });
   if (!gate.due) return { ran: false, reason: gate.reason };
@@ -1039,7 +1040,7 @@ async function runActivityCheck() {
     event: "activity_model_request",
     idle_minutes: gate.idleMinutes,
     daily_slot: nextState.count,
-    daily_limit: readNumberEnv("AUTONOMY_MAX_ACTIONS_PER_DAY", 3, { min: 1, max: 24 }),
+    daily_limit: maxPerDay,
     model: activityModel,
     backup_model: activityBackupModel || null
   }));
@@ -1159,7 +1160,10 @@ async function runActivityCheck() {
     reply_to_message_id: result.replyToMessageId || result.decision?.replyToMessageId || 0,
     reason: result.reason || "",
     failure_kind: result.failureKind || "",
-    daily_slot_charged: budgetCharged
+    daily_slot_charged: budgetCharged,
+    daily_slots_used: nextState.count,
+    daily_slots_limit: maxPerDay,
+    daily_slots_remaining: Math.max(0, maxPerDay - nextState.count)
   };
   try {
     const archived = appendWakeArchive(archiveRecord);
@@ -1178,7 +1182,10 @@ async function runActivityCheck() {
     action: result.decision?.action || "unknown",
     track_uri: result.trackUri || "",
     reason: result.reason || result.decision?.reason || "",
-    daily_slot_charged: budgetCharged
+    daily_slot_charged: budgetCharged,
+    daily_slots_used: nextState.count,
+    daily_slots_limit: maxPerDay,
+    daily_slots_remaining: Math.max(0, maxPerDay - nextState.count)
   }));
   return { ...result, ran: true };
 }

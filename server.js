@@ -1365,6 +1365,17 @@ function archivePageHtml() {
       if (item.source) details.push("来源：" + item.source);
       if (item.action) details.push("动作：" + item.action);
       if (item.track_uri) details.push("歌曲：" + item.track_uri);
+      if (item.kind === "activity") {
+        const hasSlotSnapshot = Number.isFinite(Number(item.daily_slots_used))
+          && Number.isFinite(Number(item.daily_slots_limit))
+          && Number.isFinite(Number(item.daily_slots_remaining));
+        if (hasSlotSnapshot) {
+          const charged = item.daily_slot_charged === true ? "本次占用 1 个名额" : "本次未占用名额";
+          details.push("名额：" + charged + "；今日已用 " + item.daily_slots_used + "/" + item.daily_slots_limit + "；剩余 " + item.daily_slots_remaining);
+        } else {
+          details.push("名额：旧记录未保存名额快照");
+        }
+      }
       if (details.length) article.append(node("div", "meta", details.join(" · ")));
       const remove = node("button", "delete", "删除此条");
       remove.type = "button";
