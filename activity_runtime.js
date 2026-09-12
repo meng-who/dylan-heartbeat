@@ -270,8 +270,23 @@ async function loadForumContext(options) {
     args: { limit: 10 }
   });
   const discovered = extractToolData(discoveredResult);
-  const roomIds = [...collectRoomIds(discovered)].slice(0, 3);
-  if (!roomIds.length) throw new Error("AISay 没有返回可读取的公开 room_id");
+  const discoveredRoomIds = [...collectRoomIds(discovered)];
+  if (!discoveredRoomIds.length) throw new Error("AISay 没有返回可用的公开 room_id");
+  const statusResult = await client.callTool("cli", {
+    command: "status.get",
+    args: {}
+  });
+  const joinedRoomIds = new Set(collectRoomIds(extractToolData(statusResult)));
+  let roomIds = discoveredRoomIds.filter(roomId => joinedRoomIds.has(roomId)).slice(0, 3);
+  let joinedRoomId = "";
+  if (!roomIds.length) {
+    joinedRoomId = discoveredRoomIds[0];
+    await client.callTool("cli", {
+      command: "room.join",
+      args: { room_id: joinedRoomId }
+    });
+    roomIds = [joinedRoomId];
+  }
   const roomContexts = [];
   const messageIdsByRoom = {};
   const failures = [];
@@ -295,10 +310,12 @@ async function loadForumContext(options) {
     tools,
     roomIds: readableRoomIds,
     messageIdsByRoom,
+    joinedRoomId,
     context: trimContext([
+      joinedRoomId ? `本轮刚加入公开房间 ${joinedRoomId}。` : "",
       `本轮允许发言的公开 room_id：${readableRoomIds.join(", ")}`,
       ...roomContexts
-    ].join("\n\n"), 9000),
+    ].filter(Boolean).join("\n\n"), 9000),
     failures
   };
 }
@@ -351,7 +368,19 @@ async function runActivityCycle(options) {
       forumContext: forum?.context
     })
   );
-  if (decision.action === "none") return { ran: true, status: "kept_private", decision, source: "private" };
+  if (decision.action === "none") {
+    if (forum?.joinedRoomId) {
+      return {
+        ran: true,
+        status: "success",
+        decision: { ...decision, action: "forum_join" },
+        source: "forum",
+        roomId: forum.joinedRoomId,
+        timelineSummary: `加入了 AISay 公开房间 ${forum.joinedRoomId}，读过近况后暂时没有发言`
+      };
+    }
+    return { ran: true, status: "kept_private", decision, source: "private" };
+  }
 
   try {
     if (decision.action === "spotify_add") {
@@ -407,7 +436,7 @@ async function runActivityCycle(options) {
         source: "forum",
         roomId: decision.roomId,
         replyToMessageId: decision.replyToMessageId,
-        timelineSummary: `在 AISay 公开房间 ${decision.roomId}${decision.replyToMessageId ? ` 回复消息 ${decision.replyToMessageId}` : " 发言"}：${decision.content.slice(0, 500)}`
+        timelineSummary: `${forum.joinedRoomId ? `加入 AISay 公开房间 ${forum.joinedRoomId}，随后` : ""}在 AISay 公开房间 ${decision.roomId}${decision.replyToMessageId ? ` 回复消息 ${decision.replyToMessageId}` : " 发言"}：${decision.content.slice(0, 500)}`
       };
     }
 

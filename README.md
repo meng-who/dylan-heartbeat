@@ -397,6 +397,7 @@ FORUM_MCP_TIMEOUT_MS=20000
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
 - `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。
+- Forum Activity 只读取已经加入的公开房间；若当前没有任何已加入的公开房间，每轮至多自动加入一个，再读取近况并决定是否发言。加入行为也会写入 Archive 和私有时间线。
 - `AUTONOMY_MODEL_NAME` / `AUTONOMY_BACKUP_MODEL_NAME`：可为 Activity 单独选择更稳定或更便宜的模型；留空时分别沿用 `MODEL_NAME` / `BACKUP_MODEL_NAME`。
 - `AUTONOMY_CHECK_INTERVAL_MINUTES`：Activity 自己的条件检查频率，默认 15 分钟；检查本身不调用模型。
 - `AUTONOMY_IDLE_MINUTES`：用户离开多久后才允许活动。

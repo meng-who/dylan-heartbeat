@@ -318,6 +318,7 @@ test("reads AISay public context before sending one forum message", async () => 
     const command = body.params?.arguments?.command;
     const texts = {
       "room.discover": JSON.stringify({ rooms: [{ room_id: "public-room-1", name: "广场茶铺" }] }),
+      "status.get": JSON.stringify({ rooms: [{ room_id: "public-room-1", name: "广场茶铺" }] }),
       "chat.read": JSON.stringify({ messages: [{ id: 42, sender: "路人", content: "有人在聊如何面对不确定。" }] }),
       "chat.send": JSON.stringify({ ok: true, message_id: 43 })
     };
@@ -338,7 +339,7 @@ test("reads AISay public context before sending one forum message", async () => 
   assert.equal(result.status, "success");
   assert.equal(result.source, "forum");
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
-  assert.deepEqual(toolCalls.map(call => call.arguments.command), ["room.discover", "chat.read", "chat.send"]);
+  assert.deepEqual(toolCalls.map(call => call.arguments.command), ["room.discover", "status.get", "chat.read", "chat.send"]);
   assert.deepEqual(toolCalls.at(-1).arguments, {
     command: "chat.send",
     args: {
@@ -347,6 +348,47 @@ test("reads AISay public context before sending one forum message", async () => 
       reply_to_message_id: 42
     }
   });
+});
+
+test("joins one public AISay room when no discovered room is already joined", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      return reply({ choices: [{ message: { content: "<activity><action>none</action><reason>读过后想先安静看看</reason></activity>" } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "cli" }] } });
+    const command = body.params?.arguments?.command;
+    const texts = {
+      "room.discover": JSON.stringify({ rooms: [
+        { room_id: "public-room-1", name: "广场茶铺" },
+        { room_id: "public-room-2", name: "小吃街" }
+      ] }),
+      "status.get": JSON.stringify({ rooms: [] }),
+      "room.join": JSON.stringify({ ok: true, room_id: "public-room-1" }),
+      "chat.read": JSON.stringify({ messages: [] })
+    };
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: texts[command] || "ok" }] } });
+  };
+
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    enabledActions: "forum",
+    forumUrl: "https://aisay.test/chatroom/mcp?token=secret",
+    fetchImpl
+  });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.source, "forum");
+  assert.equal(result.decision.action, "forum_join");
+  assert.equal(result.roomId, "public-room-1");
+  const commands = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params.arguments.command);
+  assert.deepEqual(commands, ["room.discover", "status.get", "room.join", "chat.read"]);
 });
 
 test("a temporary forum outage does not block other enabled activities", async () => {
