@@ -26,10 +26,11 @@ function readCookie(request, name) {
 }
 
 export async function createSessionCookie(secret) {
-  const expires = Date.now() + 7 * 24 * 60 * 60 * 1000;
+  const maxAgeSeconds = 180 * 24 * 60 * 60;
+  const expires = Date.now() + maxAgeSeconds * 1000;
   const value = String(expires);
   const signature = await hmac(secret, value);
-  return `pulse_session=${value}.${signature}; Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Strict`;
+  return `pulse_session=${value}.${signature}; Path=/; Max-Age=${maxAgeSeconds}; Expires=${new Date(expires).toUTCString()}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 export async function hasValidSession(request, secret) {
