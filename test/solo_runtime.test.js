@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { formatRecentHistory, needsNarrativeRewrite, parseSoloResult, runSoloCycle } = require("../solo_runtime");
+const { formatRecentHistory, parseSoloResult, runSoloCycle } = require("../solo_runtime");
 
 test("parses a bounded Solo decision and keeps the controller-selected mode", () => {
   const result = parseSoloResult(JSON.stringify({
@@ -13,6 +13,17 @@ test("parses a bounded Solo decision and keeps the controller-selected mode", ()
   }), "mix");
   assert.equal(result.mode, "mix");
   assert.equal(result.notify.send, true);
+});
+
+test("does not truncate a long Solo narrative", () => {
+  const narrative = "长".repeat(5000);
+  const result = parseSoloResult(JSON.stringify({
+    intensity: 0.8,
+    summary: "长篇经过",
+    narrative,
+    notify: { send: false, title: "", body: "" }
+  }), "fantasy");
+  assert.equal(result.narrative.length, 5000);
 });
 
 test("recent history removes private Pulse blocks and visible status bars", () => {
@@ -121,49 +132,10 @@ test("falls back from recall to fantasy when Ombre has no usable memory", async 
   assert.match(modelRequest.messages[0].content, /本次固定模式：fantasy/);
 });
 
-test("detects analysis-heavy Solo prose without rejecting embodied narration", () => {
-  assert.equal(needsNarrativeRewrite("我分析自己的心理，意识到这意味着某种关系需求，于是开始反思内在状态。"), true);
-  assert.equal(needsNarrativeRewrite("掌心贴上皮肤，呼吸越来越急，手指沿着腰侧移动，身体跟着节奏轻轻发颤。"), false);
-});
-
-test("retries once when the Solo model returns malformed JSON", async () => {
-  let modelCalls = 0;
-  let retryRequest;
-  const fetchImpl = async (url, init) => {
-    const body = JSON.parse(init.body);
-    if (String(url).endsWith("/api/solo/claim")) {
-      return Response.json({ claimed: true, claim: {
-        id: "retry-claim", startedAt: 1000, mode: "fantasy", chord: "兴奋上扬", desire: 0.8
-      } });
-    }
-    if (String(url) === "https://model.example.com/chat") {
-      modelCalls += 1;
-      if (modelCalls === 1) return Response.json({ choices: [{ message: { content: "这不是 JSON" } }] });
-      retryRequest = body;
-      return Response.json({ choices: [{ message: { content: JSON.stringify({
-        mode: "fantasy", intensity: 0.7, summary: "修复后的摘要", narrative: "修复后的完整经过。",
-        notify: { send: false, title: "", body: "" }
-      }) } }] });
-    }
-    if (String(url).endsWith("/api/solo/complete")) return Response.json({ completed: true });
-    throw new Error(`unexpected URL ${url}`);
-  };
-
-  const result = await runSoloCycle({
-    pulseBaseUrl: "https://pulse.example.com", pulseClientKey: "p",
-    apiUrl: "https://model.example.com/chat", apiKey: "k", model: "m",
-    lastUserAt: 0, messages: [], systemPrompt: "AI", getLatestUserAt: async () => 0,
-    fetchImpl, logger: { warn() {} }
-  });
-
-  assert.equal(result.ran, true);
-  assert.equal(modelCalls, 2);
-  assert.match(retryRequest.messages.at(-1).content, /完整、合法的 JSON/);
-});
-
-test("marks persistent model format failures as technical instead of user return", async () => {
+test("marks malformed model output as technical without regenerating it", async () => {
   let cancelBody;
   let archivedFailure;
+  let modelCalls = 0;
   const fetchImpl = async (url, init) => {
     const body = JSON.parse(init.body);
     if (String(url).endsWith("/api/solo/claim")) {
@@ -172,6 +144,7 @@ test("marks persistent model format failures as technical instead of user return
       } });
     }
     if (String(url) === "https://model.example.com/chat") {
+      modelCalls += 1;
       return Response.json({ choices: [{ message: { content: "始终不是 JSON" } }] });
     }
     if (String(url).endsWith("/api/solo/cancel")) {
@@ -194,4 +167,5 @@ test("marks persistent model format failures as technical instead of user return
   assert.equal(archivedFailure.status, "failed");
   assert.equal(archivedFailure.error_code, "invalid_model_output");
   assert.equal(archivedFailure.summary, "独处尝试未完成");
+  assert.equal(modelCalls, 1);
 });

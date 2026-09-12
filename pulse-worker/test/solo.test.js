@@ -32,6 +32,8 @@ test("solo does not claim before idle threshold or during cooldown", () => {
 test("completing solo leaves a bodily afterglow, cooldown and private record", () => {
   const now = Date.UTC(2026, 8, 4, 12, 0, 0);
   const state = createDefaultState(now);
+  const narrative = "一段完整经过。".repeat(800);
+  const summary = "摘要".repeat(200);
   state.solo.desire = 0.9;
   const claimed = claimSolo(state, {
     lastUserAt: now - 3 * 3_600_000,
@@ -42,8 +44,8 @@ test("completing solo leaves a bodily afterglow, cooldown and private record", (
     claimId: "solo-2",
     mode: "mix",
     intensity: 0.8,
-    summary: "从一段真实回忆走进了自己的幻想",
-    narrative: "一段只供私密上下文使用的独处经历",
+    summary,
+    narrative,
     recallUsed: true,
     notifyWanted: true,
     notified: true
@@ -55,6 +57,9 @@ test("completing solo leaves a bodily afterglow, cooldown and private record", (
   assert.ok(completed.state.solo.desire < 0.2);
   assert.ok(completed.state.solo.cooldownUntil > now);
   assert.equal(completed.state.solo.latest.mode, "mix");
+  assert.equal(completed.state.solo.latest.summary, summary);
+  assert.equal(completed.state.solo.latest.narrative, narrative);
+  assert.equal(normalizeState(completed.state, now).solo.latest.narrative, narrative);
   assert.equal(completed.state.solo.latest.notified, true);
   assert.match(completed.events[0].summary, /选择告诉你/);
 });
