@@ -1592,6 +1592,10 @@ app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, rep
     return reply.code(503).send({ ok: false, error: "GAMES_MCP_URL 未配置" });
   }
   try {
+    const requestedGame = String(req.query?.game || "").trim();
+    if (requestedGame && !/^[a-z][a-z0-9_]{0,95}$/.test(requestedGame)) {
+      return reply.code(400).send({ ok: false, error: "game 格式无效" });
+    }
     const client = new RemoteMcpClient({
       url: process.env.GAMES_MCP_URL,
       timeoutMs: Number(process.env.GAMES_MCP_TIMEOUT_MS) || 20_000,
@@ -1605,6 +1609,7 @@ app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, rep
       .filter(tool => required.includes(tool.name))
       .map(tool => [tool.name, tool.inputSchema || {}]));
     let games = "";
+    let guide = "";
     if (!missing.length) {
       const result = await client.callTool("list_games", {});
       games = (result?.content || [])
@@ -1613,6 +1618,22 @@ app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, rep
         .join("\n")
         .trim()
         .slice(0, 30000);
+      if (requestedGame) {
+        const availableGames = new Set();
+        const pattern = /(?:^|[|:\n])\s*([a-z][a-z0-9_]*)·/g;
+        let match;
+        while ((match = pattern.exec(games))) availableGames.add(match[1]);
+        if (!availableGames.has(requestedGame)) {
+          return reply.code(404).send({ ok: false, error: "游戏不在 list_games 目录中", game: requestedGame });
+        }
+        const result = await client.callTool("get_guide", { game: requestedGame });
+        guide = (result?.content || [])
+          .filter(item => item?.type === "text")
+          .map(item => String(item.text || ""))
+          .join("\n")
+          .trim()
+          .slice(0, 30000);
+      }
     }
     return reply.code(missing.length ? 502 : 200).send({
       ok: missing.length === 0,
@@ -1620,7 +1641,9 @@ app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, rep
       missing,
       available: names,
       schemas,
-      games
+      games,
+      guide_game: requestedGame || "",
+      guide
     });
   } catch (error) {
     req.log.error({ event: "games_activity_mcp_test_failed", error: error.message });
