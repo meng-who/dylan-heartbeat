@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { formatRecentHistory, parseSoloResult, runSoloCycle } = require("../solo_runtime");
+const { formatRecentHistory, needsNarrativeRewrite, parseSoloResult, runSoloCycle } = require("../solo_runtime");
 
 test("parses a bounded Solo decision and keeps the controller-selected mode", () => {
   const result = parseSoloResult(JSON.stringify({
@@ -119,6 +119,11 @@ test("falls back from recall to fantasy when Ombre has no usable memory", async 
   assert.equal(result.mode, "fantasy");
   assert.equal(result.recallUsed, false);
   assert.match(modelRequest.messages[0].content, /本次固定模式：fantasy/);
+});
+
+test("detects analysis-heavy Solo prose without rejecting embodied narration", () => {
+  assert.equal(needsNarrativeRewrite("我分析自己的心理，意识到这意味着某种关系需求，于是开始反思内在状态。"), true);
+  assert.equal(needsNarrativeRewrite("掌心贴上皮肤，呼吸越来越急，手指沿着腰侧移动，身体跟着节奏轻轻发颤。"), false);
 });
 
 test("retries once when the Solo model returns malformed JSON", async () => {
