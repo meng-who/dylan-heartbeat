@@ -182,13 +182,22 @@ async function requestSoloModel({
     headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({ model: selectedModel, messages, temperature, top_p: topP, stream: false })
   });
+  const attemptedModels = [model];
+  let selectedModel = model;
   let response = await request(model);
   let text = await response.text();
   if (!response.ok && backupModel && backupModel !== model && shouldFallback(response.status, text)) {
+    attemptedModels.push(backupModel);
+    selectedModel = backupModel;
     response = await request(backupModel);
     text = await response.text();
   }
-  if (!response.ok) throw new Error(`Solo 模型请求失败 HTTP ${response.status}: ${text.slice(0, 240)}`);
+  if (!response.ok) {
+    const error = new Error(`Solo 模型请求失败 HTTP ${response.status}: ${text.slice(0, 240)}`);
+    error.attemptedModels = attemptedModels;
+    error.finalModel = selectedModel;
+    throw error;
+  }
   const data = parseChatCompletionResponse(text, response.headers.get("content-type") || "");
   return contentText(data.choices?.[0]?.message?.content).trim();
 }

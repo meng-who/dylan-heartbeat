@@ -374,6 +374,8 @@ Activity 可从 Spotify 与 Ombre 两类动作中每轮选择一件。Spotify �
 ```env
 AUTONOMY_ENABLED=false
 AUTONOMY_ACTIONS=spotify,ombre
+AUTONOMY_MODEL_NAME=自主活动专用主模型（可选）
+AUTONOMY_BACKUP_MODEL_NAME=自主活动专用备用模型（可选）
 AUTONOMY_NIGHT_ONLY=false
 AUTONOMY_CHECK_INTERVAL_MINUTES=15
 AUTONOMY_IDLE_MINUTES=120
@@ -389,6 +391,7 @@ SPOTIFY_PLAYLIST_NAME=歌单显示名称
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
 - `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre` 或 `spotify,ombre`；未填写时为兼容旧部署，默认只有 `spotify`。
+- `AUTONOMY_MODEL_NAME` / `AUTONOMY_BACKUP_MODEL_NAME`：可为 Activity 单独选择更稳定或更便宜的模型；留空时分别沿用 `MODEL_NAME` / `BACKUP_MODEL_NAME`。
 - `AUTONOMY_CHECK_INTERVAL_MINUTES`：Activity 自己的条件检查频率，默认 15 分钟；检查本身不调用模型。
 - `AUTONOMY_IDLE_MINUTES`：用户离开多久后才允许活动。
 - `AUTONOMY_INTERVAL_MINUTES`：两次模型活动之间的最短间隔。

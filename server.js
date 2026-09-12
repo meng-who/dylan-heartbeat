@@ -1348,6 +1348,10 @@ function archivePageHtml() {
       }
       const details = [];
       if (item.reason) details.push("原因：" + item.reason);
+      if (Array.isArray(item.attempted_models) && item.attempted_models.length) {
+        details.push("尝试模型：" + item.attempted_models.join(" → "));
+      }
+      if (item.final_model) details.push("最终失败模型：" + item.final_model);
       if (Array.isArray(item.repairs) && item.repairs.length) details.push("修复：" + item.repairs.join("、"));
       if (item.used_backup) details.push("使用备用模型");
       if (item.source) details.push("来源：" + item.source);

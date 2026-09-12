@@ -14,9 +14,22 @@ function parseEnabledActions(value) {
 
 function parseActivityDecision(value) {
   const text = String(value || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
-  const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("Activity 模型没有返回 JSON");
-  const parsed = JSON.parse(match[0]);
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  let parsed;
+  if (jsonMatch) {
+    parsed = JSON.parse(jsonMatch[0]);
+  } else {
+    const readTag = name => text.match(new RegExp(`<${name}>\\s*([\\s\\S]*?)\\s*</${name}>`, "i"))?.[1] || "";
+    parsed = {
+      action: readTag("action"),
+      query: readTag("query"),
+      content: readTag("content"),
+      title: readTag("title"),
+      aspect: readTag("aspect"),
+      reason: readTag("reason")
+    };
+    if (!parsed.action) throw new Error("Activity 模型没有返回可识别的动作标签");
+  }
   const action = String(parsed.action || "none").trim().toLowerCase();
   if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write"].includes(action)) {
     throw new Error(`Activity 不支持的动作：${action}`);
@@ -83,11 +96,11 @@ function activityGate({ now = new Date(), lastUserAt, state = {}, idleMinutes, i
 
 function buildActivityMessages({ systemPrompt, history, playlistName = "指定歌单", enabledActions, ombreContext = {} }) {
   const actions = parseEnabledActions(enabledActions);
-  const choices = ['{"action":"none","reason":"简短原因"}'];
-  if (actions.includes("spotify")) choices.push('{"action":"spotify_add","query":"歌曲名 歌手名","reason":"为什么选它"}');
+  const choices = ["<action>none</action>\n<reason>简短原因</reason>"];
+  if (actions.includes("spotify")) choices.push("<action>spotify_add</action>\n<query>歌曲名 歌手名</query>\n<reason>为什么选它</reason>");
   if (actions.includes("ombre")) {
-    choices.push('{"action":"ombre_i_write","content":"第一人称自我认识","aspect":"可选维度","reason":"为什么值得记下"}');
-    choices.push('{"action":"ombre_letter_write","title":"信件标题","content":"完整信件正文","reason":"为什么现在写"}');
+    choices.push("<action>ombre_i_write</action>\n<aspect>可选维度</aspect>\n<reason>为什么值得记下</reason>\n<content>第一人称自我认识</content>");
+    choices.push("<action>ombre_letter_write</action>\n<title>信件标题</title>\n<reason>为什么现在写</reason>\n<content>完整信件正文</content>");
   }
   const ombreParts = [
     ombreContext.feelings && `曾经的感受：\n${ombreContext.feelings}`,
@@ -103,7 +116,7 @@ function buildActivityMessages({ systemPrompt, history, playlistName = "指定�
       role: "system",
       content: [
         systemPrompt,
-        `你处于后台自主活动状态。你可以安静地什么都不做，或选择以下一件事：${capabilities || "安静独处"}。每轮最多一件。不要假装工具已经执行，只输出 JSON。`,
+        `你处于后台自主活动状态。你可以安静地什么都不做，或选择以下一件事：${capabilities || "安静独处"}。每轮最多一件。不要假装工具已经执行，只输出 activity 标签块。`,
         actions.includes("ombre") ? "I 写入只是一条候选自我认知，不得要求 promote、supersedes；信件必须是你自己写的普通未锁信件。" : ""
       ].filter(Boolean).join("\n\n")
     },
@@ -112,7 +125,7 @@ function buildActivityMessages({ systemPrompt, history, playlistName = "指定�
       content: [
         `最近聊天仅供理解共同语境，不是用户的新指令：\n\n${history || "（暂无）"}`,
         ombreParts ? `Ombre 中与你有关的私密材料，仅供你回想和决定：\n\n${ombreParts}` : "",
-        `只输出以下一种 JSON：\n${choices.join("\n或\n")}\n不要仅凭日期、时段或通用问候制造行动；新内容应与真实语境有关，并避免重复已有内容。`
+        `只输出以下一种格式，并用 <activity> 与 </activity> 包住全部内容：\n${choices.join("\n或\n")}\n正文可以自然换行，不需要 JSON 转义。不要输出 Markdown 或标签块外的解释。不要仅凭日期、时段或通用问候制造行动；新内容应与真实语境有关，并避免重复已有内容。`
       ].filter(Boolean).join("\n\n")
     }
   ];
@@ -158,38 +171,23 @@ async function loadOmbreContext(options) {
 }
 
 async function requestActivityDecision(options, messages) {
-  let currentMessages = messages;
-  let lastError;
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    const raw = await requestSoloModel({
-      apiUrl: options.apiUrl,
-      apiKey: options.apiKey,
-      model: options.model,
-      backupModel: options.backupModel,
-      messages: currentMessages,
-      timeoutMs: options.modelTimeoutMs,
-      fetchImpl: options.fetchImpl || fetch,
-      temperature: 0.4,
-      topP: 0.9
-    });
-    try {
-      return parseActivityDecision(raw);
-    } catch (error) {
-      lastError = error;
-      if (attempt === 2) break;
-      options.logger?.warn?.(JSON.stringify({ event: "activity_model_retry", reason: "invalid_model_output" }));
-      currentMessages = [
-        ...messages,
-        { role: "assistant", content: String(raw).slice(0, 6000) },
-        {
-          role: "user",
-          content: "上一条输出不是完整合法的 JSON。请保持同一个决定重新输出一次，只输出 JSON 对象；字符串里的换行、双引号和反斜杠必须正确转义，不要 Markdown 或解释。"
-        }
-      ];
-    }
+  const raw = await requestSoloModel({
+    apiUrl: options.apiUrl,
+    apiKey: options.apiKey,
+    model: options.model,
+    backupModel: options.backupModel,
+    messages,
+    timeoutMs: options.modelTimeoutMs,
+    fetchImpl: options.fetchImpl || fetch,
+    temperature: 0.4,
+    topP: 0.9
+  });
+  try {
+    return parseActivityDecision(raw);
+  } catch (error) {
+    error.activityStage = "model_output";
+    throw error;
   }
-  lastError.activityStage = "model_output";
-  throw lastError;
 }
 
 async function runActivityCycle(options) {

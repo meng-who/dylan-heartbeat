@@ -980,7 +980,9 @@ async function runActivityCheck() {
     return { ran: false, reason: "outside_activity_window" };
   }
   const enabledActions = parseEnabledActions(process.env.AUTONOMY_ACTIONS);
-  const required = ["TARGET_API_URL", "TARGET_API_KEY", "MODEL_NAME"];
+  const activityModel = String(process.env.AUTONOMY_MODEL_NAME || process.env.MODEL_NAME || "").trim();
+  const activityBackupModel = String(process.env.AUTONOMY_BACKUP_MODEL_NAME || process.env.BACKUP_MODEL_NAME || "").trim();
+  const required = ["TARGET_API_URL", "TARGET_API_KEY"];
   if (enabledActions.includes("spotify")) required.push("SPOTIFY_MCP_URL", "SPOTIFY_PLAYLIST_ID");
   if (enabledActions.includes("ombre")) required.push("OMBRE_MCP_URL", "OMBRE_MCP_TOKEN");
   if (!enabledActions.length) {
@@ -988,6 +990,7 @@ async function runActivityCheck() {
     return { ran: false, reason: "not_configured" };
   }
   const missing = required.filter(key => !String(process.env[key] || "").trim());
+  if (!activityModel) missing.push("AUTONOMY_MODEL_NAME/MODEL_NAME");
   if (missing.length) {
     console.warn(JSON.stringify({ event: "activity_config_missing", variables: missing }));
     return { ran: false, reason: "not_configured" };
@@ -1027,7 +1030,9 @@ async function runActivityCheck() {
     event: "activity_model_request",
     idle_minutes: gate.idleMinutes,
     daily_slot: nextState.count,
-    daily_limit: readNumberEnv("AUTONOMY_MAX_ACTIONS_PER_DAY", 3, { min: 1, max: 24 })
+    daily_limit: readNumberEnv("AUTONOMY_MAX_ACTIONS_PER_DAY", 3, { min: 1, max: 24 }),
+    model: activityModel,
+    backup_model: activityBackupModel || null
   }));
 
   const cleanMessages = stripPosition(getWakeHistoryMessages(messages));
@@ -1050,8 +1055,8 @@ async function runActivityCheck() {
     result = await runActivityCycle({
       apiUrl: process.env.TARGET_API_URL,
       apiKey: process.env.TARGET_API_KEY,
-      model: process.env.MODEL_NAME,
-      backupModel: process.env.BACKUP_MODEL_NAME,
+      model: activityModel,
+      backupModel: activityBackupModel,
       logger: console,
       modelTimeoutMs: WAKE_UPSTREAM_TIMEOUT_MS,
       systemPrompt,
@@ -1080,10 +1085,12 @@ async function runActivityCheck() {
       ran: true,
       status: "failed",
       reason: invalidModelOutput
-        ? `模型输出格式错误（已自动重试一次）：${error.message || String(error)}`
+        ? `模型输出格式错误（本轮未重试）：${error.message || String(error)}`
         : error.message || String(error),
       decision: error.activityDecision || (invalidModelOutput ? { action: "model_decision" } : undefined),
-      source: error.activitySource || (invalidModelOutput ? "model" : "activity")
+      source: error.activitySource || (invalidModelOutput ? "model" : "activity"),
+      attemptedModels: error.attemptedModels || [],
+      finalModel: error.finalModel || ""
     };
   }
 
@@ -1109,7 +1116,10 @@ async function runActivityCheck() {
     kind: "activity",
     local_time: getLocalTimeString(),
     status: result.status,
-    model: process.env.MODEL_NAME,
+    model: activityModel,
+    backup_model: activityBackupModel,
+    attempted_models: result.attemptedModels || [],
+    final_model: result.finalModel || "",
     source: result.source || "activity",
     action: result.decision?.action || "activity_cycle",
     summary: result.decision?.reason || "",

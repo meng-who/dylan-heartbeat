@@ -22,4 +22,6 @@ test("archive page client script is valid JavaScript", () => {
   assert.match(html, /自主活动/);
   assert.match(html, /本次构想（未执行）/);
   assert.match(html, /拟写内容（未执行）/);
+  assert.match(html, /尝试模型：/);
+  assert.match(html, /最终失败模型：/);
 });

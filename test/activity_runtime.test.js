@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   activityGate,
   parseActivityDecision,
+  requestActivityDecision,
   runActivityCycle
 } = require("../activity_runtime");
 
@@ -51,27 +52,56 @@ test("parses safe Ombre activity decisions", () => {
   });
 });
 
-test("retries one malformed Activity JSON response at lower temperature", async () => {
+test("parses a multiline tagged letter in one model request", async () => {
   const requests = [];
   const fetchImpl = async (_url, init) => {
     const body = JSON.parse(init.body);
     requests.push(body);
-    const content = requests.length === 1
-      ? '{"action":"none","reason":"引号"坏了"}'
-      : '{"action":"none","reason":"现在格式正确"}';
+    const content = `<activity>
+<action>ombre_letter_write</action>
+<title>关于“今天”</title>
+<reason>想留下一封信</reason>
+<content>第一段里可以有“引号”。
+
+第二段也不需要 JSON 转义。</content>
+</activity>`;
     return Response.json({ choices: [{ message: { content } }] });
   };
-  const result = await runActivityCycle({
+  const decision = await requestActivityDecision({
     apiUrl: "https://model.test/v1/chat/completions",
     model: "model",
-    enabledActions: "spotify",
     fetchImpl
-  });
-  assert.equal(result.status, "kept_private");
-  assert.equal(result.decision.reason, "现在格式正确");
-  assert.equal(requests.length, 2);
+  }, [{ role: "user", content: "只输出 activity 标签块" }]);
+  assert.equal(decision.action, "ombre_letter_write");
+  assert.equal(decision.title, "关于“今天”");
+  assert.equal(decision.content, "第一段里可以有“引号”。\n\n第二段也不需要 JSON 转义。");
+  assert.equal(requests.length, 1);
   assert.equal(requests[0].temperature, 0.4);
-  assert.match(requests[1].messages.at(-1).content, /完整合法的 JSON/);
+  assert.match(requests[0].messages.at(-1).content, /activity 标签块/);
+});
+
+test("records the attempted model chain when primary and backup channels fail", async () => {
+  const requestedModels = [];
+  const fetchImpl = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    requestedModels.push(body.model);
+    return Response.json({ error: { code: "model_not_found", message: `No channel for ${body.model}` } }, { status: 503 });
+  };
+  await assert.rejects(
+    () => runActivityCycle({
+      apiUrl: "https://model.test/v1/chat/completions",
+      model: "primary",
+      backupModel: "backup",
+      enabledActions: "spotify",
+      fetchImpl
+    }),
+    error => {
+      assert.deepEqual(error.attemptedModels, ["primary", "backup"]);
+      assert.equal(error.finalModel, "backup");
+      return true;
+    }
+  );
+  assert.deepEqual(requestedModels, ["primary", "backup"]);
 });
 
 test("searches and adds one track without exposing playback tools", async () => {
