@@ -1365,6 +1365,8 @@ function archivePageHtml() {
       if (item.source) details.push("来源：" + item.source);
       if (item.action) details.push("动作：" + item.action);
       if (item.track_uri) details.push("歌曲：" + item.track_uri);
+      if (item.game_name) details.push("游戏：" + item.game_name);
+      if (item.game_outcome) details.push("结果：" + item.game_outcome);
       if (item.kind === "activity") {
         const hasSlotSnapshot = Number.isFinite(Number(item.daily_slots_used))
           && Number.isFinite(Number(item.daily_slots_limit))
@@ -1377,6 +1379,18 @@ function archivePageHtml() {
         }
       }
       if (details.length) article.append(node("div", "meta", details.join(" · ")));
+      if (item.kind === "activity" && Array.isArray(item.game_steps) && item.game_steps.length) {
+        const gameSteps = node("details", "narrative");
+        gameSteps.append(node("summary", "", "查看游戏经过（" + item.game_steps.length + " 步）"));
+        const stepText = item.game_steps.map(step => [
+          "第 " + step.number + " 步：" + step.action,
+          step.summary ? "意图：" + step.summary : "",
+          "参数：" + JSON.stringify(step.params || {}),
+          step.result ? "返回：" + step.result : ""
+        ].filter(Boolean).join("\\n")).join("\\n\\n");
+        gameSteps.append(node("div", "narrative-body", stepText));
+        article.append(gameSteps);
+      }
       const remove = node("button", "delete", "删除此条");
       remove.type = "button";
       remove.addEventListener("click", async () => {

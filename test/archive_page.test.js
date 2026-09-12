@@ -28,4 +28,6 @@ test("archive page client script is valid JavaScript", () => {
   assert.match(html, /今日已用/);
   assert.match(html, /剩余/);
   assert.match(html, /旧记录未保存名额快照/);
+  assert.match(html, /查看游戏经过/);
+  assert.match(html, /游戏：/);
 });

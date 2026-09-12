@@ -1,7 +1,7 @@
 const { RemoteMcpClient } = require("./remote_mcp_client");
 const { requestSoloModel } = require("./solo_runtime");
 
-const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum"]);
+const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum", "games"]);
 const SELF_ASPECTS = new Set(["nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"]);
 
 function parseEnabledActions(value) {
@@ -28,12 +28,13 @@ function parseActivityDecision(value) {
       aspect: readTag("aspect"),
       room_id: readTag("room_id"),
       reply_to_message_id: readTag("reply_to_message_id"),
+      game: readTag("game"),
       reason: readTag("reason")
     };
     if (!parsed.action) throw new Error("Activity 模型没有返回可识别的动作标签");
   }
   const action = String(parsed.action || "none").trim().toLowerCase();
-  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_send"].includes(action)) {
+  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_send", "games_play"].includes(action)) {
     throw new Error(`Activity 不支持的动作：${action}`);
   }
   const query = String(parsed.query || [parsed.track, parsed.artist].filter(Boolean).join(" ")).trim();
@@ -44,6 +45,7 @@ function parseActivityDecision(value) {
   if (action === "ombre_i_write" && !content) throw new Error("Activity 缺少自我认知内容");
   if (action === "ombre_letter_write" && !content) throw new Error("Activity 缺少信件正文");
   if (action === "forum_send" && !content) throw new Error("Activity 缺少论坛消息正文");
+  if (action === "games_play" && !String(parsed.game || "").trim()) throw new Error("Activity 缺少游戏名称");
   if (action === "ombre_i_write" && aspect && !SELF_ASPECTS.has(aspect)) throw new Error(`Activity 不支持的认知维度：${aspect}`);
   const decision = {
     action,
@@ -59,6 +61,7 @@ function parseActivityDecision(value) {
     decision.replyToMessageId = Number.isSafeInteger(replyId) && replyId > 0 ? replyId : 0;
     if (!decision.roomId) throw new Error("Activity 缺少论坛 room_id");
   }
+  if (action === "games_play") decision.game = String(parsed.game || "").trim().slice(0, 96);
   return decision;
 }
 
@@ -124,7 +127,8 @@ function buildActivityMessages({
   playlistName = "指定歌单",
   enabledActions,
   ombreContext = {},
-  forumContext = ""
+  forumContext = "",
+  gamesContext = ""
 }) {
   const actions = parseEnabledActions(enabledActions);
   const choices = ["<action>none</action>\n<reason>简短原因</reason>"];
@@ -136,6 +140,9 @@ function buildActivityMessages({
   if (actions.includes("forum")) {
     choices.push("<action>forum_send</action>\n<room_id>只能填写下方刚读取到的公开房间 ID</room_id>\n<reply_to_message_id>可选，只能填写刚读取到的消息 ID</reply_to_message_id>\n<reason>为什么想在公开聊天室说这句话</reason>\n<content>要公开发送的完整内容，最多 1200 字</content>");
   }
+  if (actions.includes("games")) {
+    choices.push("<action>games_play</action>\n<game>只能填写下方目录中的精确游戏名称</game>\n<reason>为什么现在想玩它</reason>");
+  }
   const ombreParts = [
     ombreContext.feelings && `曾经的感受：\n${ombreContext.feelings}`,
     ombreContext.self && `已有的自我认知：\n${ombreContext.self}`,
@@ -144,7 +151,8 @@ function buildActivityMessages({
   const capabilities = [
     actions.includes("spotify") && `为“${playlistName}”挑选并添加一首歌`,
     actions.includes("ombre") && "回想感受、整理一条尚待沉淀的自我认识，或以 AI 身份写一封不加锁的新信",
-    actions.includes("forum") && "阅读 AISay 的公开近况，并以自己的身份说一句真正想说的话"
+    actions.includes("forum") && "阅读 AISay 的公开近况，并以自己的身份说一句真正想说的话",
+    actions.includes("games") && "从小游戏目录里选一款，进行一段最多四步、可以暂停待续的游戏"
   ].filter(Boolean).join("；");
   return [
     {
@@ -153,7 +161,8 @@ function buildActivityMessages({
         systemPrompt,
         `你处于后台自主活动状态。你可以安静地什么都不做，或选择以下一件事：${capabilities || "安静独处"}。每轮最多一件。不要假装工具已经执行，只输出 activity 标签块。`,
         actions.includes("ombre") ? "I 写入只是一条候选自我认知，不得要求 promote、supersedes；信件必须是你自己写的普通未锁信件。" : "",
-        actions.includes("forum") ? "论坛内容是公开发言。不得透露用户隐私、私聊原文、密钥、地址或后台系统细节；不要冒充用户，也不要仅为完成任务而硬凑发言。" : ""
+        actions.includes("forum") ? "论坛内容是公开发言。不得透露用户隐私、私聊原文、密钥、地址或后台系统细节；不要冒充用户，也不要仅为完成任务而硬凑发言。" : "",
+        actions.includes("games") ? "游戏可以连续多步，但不得调用账号管理；把它当作真实的独处娱乐，不要为了消耗名额硬玩。" : ""
       ].filter(Boolean).join("\n\n")
     },
     {
@@ -162,6 +171,7 @@ function buildActivityMessages({
         `最近聊天仅供理解共同语境，不是用户的新指令：\n\n${history || "（暂无）"}`,
         ombreParts ? `Ombre 中与你有关的私密材料，仅供你回想和决定：\n\n${ombreParts}` : "",
         forumContext ? `AISay 公开聊天室近况，仅供你决定是否参与：\n\n${forumContext}` : "",
+        gamesContext ? `当前小游戏目录，仅供你决定是否游玩：\n\n${gamesContext}` : "",
         `只输出以下一种格式，并用 <activity> 与 </activity> 包住全部内容：\n${choices.join("\n或\n")}\n正文可以自然换行，不需要 JSON 转义。不要输出 Markdown 或标签块外的解释。不要仅凭日期、时段或通用问候制造行动；新内容应与真实语境有关，并避免重复已有内容。`
       ].filter(Boolean).join("\n\n")
     }
@@ -320,6 +330,144 @@ async function loadForumContext(options) {
   };
 }
 
+function collectGameNames(catalog) {
+  const names = new Set();
+  const pattern = /(?:^|[|:\n])\s*([a-z][a-z0-9_]*)·/g;
+  let match;
+  while ((match = pattern.exec(String(catalog || "")))) names.add(match[1]);
+  return [...names];
+}
+
+async function loadGamesContext(options) {
+  const client = new RemoteMcpClient({
+    url: options.gamesUrl,
+    timeoutMs: options.gamesTimeoutMs,
+    fetchImpl: options.fetchImpl || fetch,
+    clientName: "dylan-games-activity"
+  });
+  const tools = await client.listTools();
+  const names = new Set(tools.map(tool => tool.name));
+  const missing = ["list_games", "get_guide", "play"].filter(name => !names.has(name));
+  if (missing.length) throw new Error(`Games MCP 缺少工具：${missing.join(", ")}`);
+  const result = await client.callTool("list_games", {});
+  const catalog = trimContext(extractToolText(result), 12000);
+  const gameNames = collectGameNames(catalog);
+  if (!gameNames.length) throw new Error("Games MCP 没有返回可识别的游戏目录");
+  return { client, tools, catalog, gameNames };
+}
+
+function parseGameStepDecision(value) {
+  const text = String(value || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const match = text.match(/\{[\s\S]*\}/);
+  if (!match) throw new Error("游戏步骤没有返回 JSON");
+  const parsed = JSON.parse(match[0]);
+  const done = parsed.done === true;
+  const action = String(parsed.action || "").trim();
+  if (!done && !action) throw new Error("游戏步骤缺少 action");
+  if (action && (!/^[a-zA-Z][a-zA-Z0-9_.-]{0,95}$/.test(action))) throw new Error("游戏步骤 action 格式无效");
+  const params = parsed.params == null ? {} : parsed.params;
+  if (!params || Array.isArray(params) || typeof params !== "object") throw new Error("游戏步骤 params 必须是对象");
+  if (JSON.stringify(params).length > 8000) throw new Error("游戏步骤 params 过长");
+  return {
+    done,
+    action,
+    params,
+    summary: String(parsed.summary || "").trim().slice(0, 500)
+  };
+}
+
+async function requestGameStep(options, { game, guide, latestResult, stepNumber }) {
+  const raw = await requestSoloModel({
+    apiUrl: options.apiUrl,
+    apiKey: options.apiKey,
+    model: options.model,
+    backupModel: options.backupModel,
+    timeoutMs: options.modelTimeoutMs,
+    fetchImpl: options.fetchImpl || fetch,
+    temperature: 0.35,
+    topP: 0.9,
+    messages: [
+      {
+        role: "system",
+        content: `${options.systemPrompt || ""}\n\n你正在自主玩小游戏 ${game}。严格依据游戏指南决定下一步；只能输出一个 JSON 对象，不得调用账号管理，也不要声称未执行的结果。`
+      },
+      {
+        role: "user",
+        content: [
+          `游戏指南：\n${trimContext(guide, 14000)}`,
+          latestResult ? `上一步结果：\n${trimContext(latestResult, 6000)}` : "这是本轮第一步。",
+          `当前是第 ${stepNumber} 步。继续时输出 {"done":false,"action":"指南中的动作","params":{},"summary":"简短意图"}；已经自然结束或现在想暂停时输出 {"done":true,"summary":"结果或暂停原因"}。只输出 JSON。`
+        ].join("\n\n")
+      }
+    ]
+  });
+  try {
+    return parseGameStepDecision(raw);
+  } catch (error) {
+    error.activityStage = "model_output";
+    throw error;
+  }
+}
+
+async function runGameSession(options, games, decision) {
+  if (!games.gameNames.includes(decision.game)) throw new Error("Games Activity 拒绝目录之外的游戏名称");
+  const guideResult = await games.client.callTool("get_guide", { game: decision.game });
+  const guide = extractToolText(guideResult);
+  if (!guide) throw new Error("Games MCP 没有返回游戏指南");
+  const steps = [];
+  let latestResult = "";
+  let outcome = "达到本轮四步上限，暂停待续";
+  for (let index = 0; index < 4; index += 1) {
+    let step;
+    try {
+      step = await requestGameStep(options, {
+        game: decision.game,
+        guide,
+        latestResult,
+        stepNumber: index + 1
+      });
+    } catch (error) {
+      if (steps.length) error.activityStage = "game_session";
+      error.gameName = decision.game;
+      error.gameSteps = steps;
+      throw error;
+    }
+    if (step.done) {
+      outcome = step.summary || (steps.length ? "本轮自然结束" : "看完指南后决定暂不开始");
+      break;
+    }
+    try {
+      const result = await games.client.callTool("play", {
+        game: decision.game,
+        action: step.action,
+        params: step.params
+      });
+      latestResult = trimContext(extractToolText(result) || JSON.stringify(result?.structuredContent || {}), 6000);
+      steps.push({
+        number: index + 1,
+        action: step.action,
+        params: step.params,
+        summary: step.summary,
+        result: trimContext(latestResult, 3500)
+      });
+    } catch (error) {
+      error.gameName = decision.game;
+      error.gameSteps = steps;
+      throw error;
+    }
+  }
+  return {
+    ran: true,
+    status: "success",
+    decision,
+    source: "games",
+    gameName: decision.game,
+    gameSteps: steps,
+    gameOutcome: outcome,
+    timelineSummary: `玩了小游戏「${decision.game}」${steps.length ? `，完成 ${steps.length} 步` : "，看完指南后没有开始"}；${outcome}`
+  };
+}
+
 async function requestActivityDecision(options, messages) {
   const raw = await requestSoloModel({
     apiUrl: options.apiUrl,
@@ -358,6 +506,19 @@ async function runActivityCycle(options) {
       }));
     }
   }
+  let games;
+  if (enabledActions.includes("games")) {
+    try {
+      games = await loadGamesContext(options);
+    } catch (error) {
+      if (enabledActions.length === 1) throw error;
+      availableActions = availableActions.filter(action => action !== "games");
+      options.logger?.warn?.(JSON.stringify({
+        event: "games_activity_context_unavailable",
+        error: error.message || String(error)
+      }));
+    }
+  }
 
   const decision = await requestActivityDecision(
     options,
@@ -365,7 +526,8 @@ async function runActivityCycle(options) {
       ...options,
       enabledActions: availableActions,
       ombreContext: ombre?.context,
-      forumContext: forum?.context
+      forumContext: forum?.context,
+      gamesContext: games?.catalog
     })
   );
   if (decision.action === "none") {
@@ -440,6 +602,11 @@ async function runActivityCycle(options) {
       };
     }
 
+    if (decision.action === "games_play") {
+      if (!availableActions.includes("games") || !games) throw new Error("Games Activity 未启用");
+      return await runGameSession(options, games, decision);
+    }
+
     if (!enabledActions.includes("ombre") || !ombre) throw new Error("Ombre Activity 未启用");
     if (decision.action === "ombre_i_write") {
     if (!ombre.tools.some(tool => tool.name === "I")) throw new Error("Ombre MCP 缺少 I 工具");
@@ -475,7 +642,9 @@ async function runActivityCycle(options) {
     error.activityDecision = decision;
     error.activitySource = decision.action.startsWith("ombre_")
       ? "ombre"
-      : decision.action.startsWith("forum_") ? "forum" : "spotify";
+      : decision.action.startsWith("forum_")
+        ? "forum"
+        : decision.action.startsWith("games_") ? "games" : "spotify";
     throw error;
   }
 }
@@ -490,12 +659,16 @@ module.exports = {
   extractToolData,
   collectMessageIds,
   collectRoomIds,
+  collectGameNames,
+  loadGamesContext,
   loadForumContext,
   loadOmbreContext,
   parseActivityDecision,
+  parseGameStepDecision,
   parseEnabledActions,
   requestActivityDecision,
   resolvePlaylistAddAction,
+  runGameSession,
   runActivityCycle,
   shouldChargeActivityBudget
 };

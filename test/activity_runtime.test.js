@@ -5,6 +5,7 @@ const {
   activityGate,
   classifyActivityFailure,
   parseActivityDecision,
+  parseGameStepDecision,
   requestActivityDecision,
   runActivityCycle,
   shouldChargeActivityBudget
@@ -91,6 +92,18 @@ test("parses a forum activity decision", () => {
     reason: "想回应刚才的公开话题",
     roomId: "public-room-1",
     replyToMessageId: 42
+  });
+});
+
+test("parses a games activity choice and a bounded game step", () => {
+  assert.equal(parseActivityDecision(
+    "<activity><action>games_play</action><game>forest</game><reason>想走进一段故事</reason></activity>"
+  ).game, "forest");
+  assert.deepEqual(parseGameStepDecision('{"done":false,"action":"start","params":{"line":"red"},"summary":"开始一条角色线"}'), {
+    done: false,
+    action: "start",
+    params: { line: "red" },
+    summary: "开始一条角色线"
   });
 });
 
@@ -412,4 +425,51 @@ test("a temporary forum outage does not block other enabled activities", async (
   assert.equal(result.status, "kept_private");
   assert.equal(warnings.length, 1);
   assert.match(warnings[0], /forum_activity_context_unavailable/);
+});
+
+test("plays a multi-step game session without exposing account management", async () => {
+  const calls = [];
+  let modelCall = 0;
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      const outputs = [
+        "<activity><action>games_play</action><game>forest</game><reason>想走进一段故事</reason></activity>",
+        '{"done":false,"action":"start","params":{"line":"red"},"summary":"开始红线"}',
+        '{"done":true,"summary":"在岔路口先停一会儿"}'
+      ];
+      return reply({ choices: [{ message: { content: outputs[modelCall++] } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "list_games" }, { name: "get_guide" }, { name: "play" }, { name: "account" }
+    ] } });
+    const name = body.params?.name;
+    const texts = {
+      list_games: "小游戏: forest·格林童话境遇·作者 | arcade·文字街机厅·作者",
+      get_guide: "forest 支持 start、observe、choose、status。先 start。",
+      play: '{"ok":true,"scene":"你来到林中岔路口"}'
+    };
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: texts[name] || "ok" }] } });
+  };
+
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    enabledActions: "games",
+    gamesUrl: "https://games.test/mcp?token=secret",
+    fetchImpl
+  });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.source, "games");
+  assert.equal(result.gameName, "forest");
+  assert.equal(result.gameSteps.length, 1);
+  assert.equal(result.gameOutcome, "在岔路口先停一会儿");
+  const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
+  assert.deepEqual(toolCalls.map(call => call.name), ["list_games", "get_guide", "play"]);
+  assert.equal(toolCalls.some(call => call.name === "account"), false);
 });

@@ -994,6 +994,7 @@ async function runActivityCheck() {
   if (enabledActions.includes("spotify")) required.push("SPOTIFY_MCP_URL", "SPOTIFY_PLAYLIST_ID");
   if (enabledActions.includes("ombre")) required.push("OMBRE_MCP_URL", "OMBRE_MCP_TOKEN");
   if (enabledActions.includes("forum")) required.push("FORUM_MCP_URL");
+  if (enabledActions.includes("games")) required.push("GAMES_MCP_URL");
   if (!enabledActions.length) {
     console.warn(JSON.stringify({ event: "activity_config_missing", variables: ["AUTONOMY_ACTIONS"] }));
     return { ran: false, reason: "not_configured" };
@@ -1086,7 +1087,9 @@ async function runActivityCheck() {
       userName: process.env.USER_DISPLAY_NAME || "",
       forumUrl: process.env.FORUM_MCP_URL,
       forumToken: process.env.FORUM_MCP_TOKEN,
-      forumTimeoutMs: readPositiveTimeout("FORUM_MCP_TIMEOUT_MS", 20_000)
+      forumTimeoutMs: readPositiveTimeout("FORUM_MCP_TIMEOUT_MS", 20_000),
+      gamesUrl: process.env.GAMES_MCP_URL,
+      gamesTimeoutMs: readPositiveTimeout("GAMES_MCP_TIMEOUT_MS", 20_000)
     });
     if (result.trackUri && result.status === "success") {
       nextState.recent_track_uris.push(result.trackUri);
@@ -1104,7 +1107,9 @@ async function runActivityCheck() {
       source: error.activitySource || (invalidModelOutput ? "model" : "activity"),
       failureKind: classifyActivityFailure(error),
       attemptedModels: error.attemptedModels || [],
-      finalModel: error.finalModel || ""
+      finalModel: error.finalModel || "",
+      gameName: error.gameName || "",
+      gameSteps: error.gameSteps || []
     };
   }
 
@@ -1158,6 +1163,9 @@ async function runActivityCheck() {
     track_uri: result.trackUri || "",
     room_id: result.roomId || result.decision?.roomId || "",
     reply_to_message_id: result.replyToMessageId || result.decision?.replyToMessageId || 0,
+    game_name: result.gameName || result.decision?.game || "",
+    game_steps: Array.isArray(result.gameSteps) ? result.gameSteps : [],
+    game_outcome: result.gameOutcome || "",
     reason: result.reason || "",
     failure_kind: result.failureKind || "",
     daily_slot_charged: budgetCharged,
