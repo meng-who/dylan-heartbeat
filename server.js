@@ -32,6 +32,7 @@ const {
   requestTraceId
 } = require("./http_resilience");
 const { RemoteMcpClient } = require("./remote_mcp_client");
+const { authorizeAdmin, buildAdminSessionCookie } = require("./admin_auth");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -584,7 +585,8 @@ const PREFERRED_ENV_ORDER = [
   "TIME_ZONE",
   "RESTART_COMMAND",
   "ADMIN_USER",
-  "ADMIN_PASSWORD"
+  "ADMIN_PASSWORD",
+  "ADMIN_SESSION_DAYS"
 ];
 
 function loadPresets() {
@@ -1151,24 +1153,30 @@ function readDiaryEntries(limit = 20) {
 }
 
 // ========================
-// HTTP Basic Auth
+// HTTP Basic Auth with a signed persistent session for mobile browsers.
 // ========================
 function basicAuth(req, reply, done) {
-  const auth = req.headers.authorization || "";
-  const [scheme, encoded] = auth.split(" ");
-  if (scheme !== "Basic" || !encoded) {
-    reply.code(401).header("WWW-Authenticate", 'Basic realm="Admin"').send("Unauthorized");
-    return;
+  const user = process.env.ADMIN_USER || "";
+  const password = process.env.ADMIN_PASSWORD || "";
+  const access = authorizeAdmin({
+    authorization: req.headers.authorization,
+    cookie: req.headers.cookie,
+    user,
+    password
+  });
+  if (!access.authorized) {
+    return reply.code(401).header("WWW-Authenticate", 'Basic realm="Admin"').send("Unauthorized");
   }
-  const decoded = Buffer.from(encoded, "base64").toString();
-  const colonIndex = decoded.indexOf(":");
-  const user = decoded.substring(0, colonIndex);
-  const password = decoded.substring(colonIndex + 1);
-  if (user === process.env.ADMIN_USER && password === process.env.ADMIN_PASSWORD) {
-    done();
-  } else {
-    reply.code(401).header("WWW-Authenticate", 'Basic realm="Admin"').send("Unauthorized");
+  if (access.source === "basic") {
+    const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim();
+    reply.header("Set-Cookie", buildAdminSessionCookie({
+      user,
+      password,
+      days: process.env.ADMIN_SESSION_DAYS,
+      secure: Boolean(process.env.RENDER || forwardedProto === "https")
+    }));
   }
+  done();
 }
 
 function archivePageHtml() {

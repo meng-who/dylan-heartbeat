@@ -246,6 +246,7 @@ TIME_ZONE=Europe/London
 RESTART_COMMAND=pm2 restart gateway wake-up --update-env
 ADMIN_USER=admin
 ADMIN_PASSWORD=你的强密码
+ADMIN_SESSION_DAYS=30
 ```
 
 图片消息说明：
@@ -301,7 +302,7 @@ http://你的电脑局域网IP:3000/v1/chat/completions
 
 启动 Gateway 后，访问 `http://你的IP:3000/admin` 即可进入管理页面。
 
-- 使用 `.env` 中设置的 `ADMIN_USER` 和 `ADMIN_PASSWORD` 登录
+- 使用 `.env` 中设置的 `ADMIN_USER` 和 `ADMIN_PASSWORD` 登录；验证成功后浏览器默认保持登录 30 天。可用 `ADMIN_SESSION_DAYS` 调整为 1–365 天，修改管理用户名或密码会立即使旧会话失效。
 - 实时查看 Gateway 和自动唤醒的运行状态
 - 在线修改 API 地址、Key、模型、Bark Key 等基础配置
 - **一键重启服务**（需配合 pm2 使用，默认执行 `pm2 restart gateway wake-up --update-env`）
