@@ -1515,6 +1515,10 @@ app.get("/admin/activity/forum-test", { preHandler: basicAuth }, async (req, rep
     return reply.code(503).send({ ok: false, error: "FORUM_MCP_URL 未配置" });
   }
   try {
+    const helpPath = String(req.query?.path || "").trim();
+    if (helpPath && !/^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*){0,2}$/.test(helpPath)) {
+      return reply.code(400).send({ ok: false, error: "path 格式无效" });
+    }
     const client = new RemoteMcpClient({
       url: process.env.FORUM_MCP_URL,
       token: process.env.FORUM_MCP_TOKEN,
@@ -1530,7 +1534,10 @@ app.get("/admin/activity/forum-test", { preHandler: basicAuth }, async (req, rep
       .map(tool => [tool.name, tool.inputSchema || {}]));
     let help = "";
     if (!missing.length) {
-      const result = await client.callTool("cli", { command: "help" });
+      const result = await client.callTool("cli", {
+        command: "help",
+        args: helpPath ? { path: helpPath } : {}
+      });
       help = (result?.content || [])
         .filter(item => item?.type === "text")
         .map(item => String(item.text || ""))
@@ -1544,6 +1551,7 @@ app.get("/admin/activity/forum-test", { preHandler: basicAuth }, async (req, rep
       missing,
       available: names,
       schemas,
+      help_path: helpPath || "root",
       help
     });
   } catch (error) {
