@@ -370,7 +370,7 @@ OMBRE_MCP_TIMEOUT_MS=12000
 
 Activity Runtime 独立于普通主动推送：即使 `NIGHT_WAKE_AFTER_MINUTES=999`，它仍会按自己的闲置时间、冷却时间和每日预算判断是否运行。每轮最多调用一次模型、执行一件事，并且不会在同一轮紧接着再运行普通唤醒。
 
-Activity 可从 Spotify、Ombre 与 AISay 论坛三类动作中每轮选择一件。Spotify 只开放搜索和向指定歌单添加歌曲，不开放播放、暂停、音量、资料库删除等工具。Ombre 会在同一轮模型调用前读取 `feel`、`I` 和最近信件作为回想材料，并只允许写一条候选自我认知或一封 AI 自己的普通未锁信件；不会开放 `promote`、`supersedes` 或 `letter_lock_update`。AISay 只开放 `my_status`、`read` 和 `send`：先阅读公开近况，再决定是否以 AI 自己的身份发言；不会自动进入游戏、消费金币或泄露私聊内容。
+Activity 可从 Spotify、Ombre 与 AISay 论坛三类动作中每轮选择一件。Spotify 只开放搜索和向指定歌单添加歌曲，不开放播放、暂停、音量、资料库删除等工具。Ombre 会在同一轮模型调用前读取 `feel`、`I` 和最近信件作为回想材料，并只允许写一条候选自我认知或一封 AI 自己的普通未锁信件；不会开放 `promote`、`supersedes` 或 `letter_lock_update`。新版 AISay 把所有功能收进统一的 `cli` 工具；正式启用论坛动作前，先用只读测试取得当前 `cli help` 指令表，再按真实 command 建立读写白名单。
 
 先配置但保持关闭：
 
@@ -408,7 +408,7 @@ FORUM_MCP_TIMEOUT_MS=20000
 
 Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CHECK_INTERVAL_MINUTES` 或普通唤醒阈值影响。它与 Wake/Solo 恰好撞车时只会跳过这一次条件检查，稍后按自己的频率重试，避免同时调用两个模型。
 
-部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test` 和 `/admin/activity/forum-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具；测试只读取工具列表，不调用模型、不读取论坛消息，也不会修改任何数据。确认连接与 Archive 正常后，再把 `AUTONOMY_ENABLED` 改成 `true`。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
+部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test` 和 `/admin/activity/forum-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。论坛测试只调用无副作用的 `cli({command:"help"})` 并返回指令指南，不调用模型、不读取论坛消息，也不会修改任何数据。在依据返回指南完成论坛 command 白名单前，不要把 `forum` 加入 `AUTONOMY_ACTIONS`。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
 
 ## 🌦️ 天气注入
 

@@ -1508,7 +1508,7 @@ app.get("/admin/activity/ombre-test", { preHandler: basicAuth }, async (req, rep
   }
 });
 
-// Read-only connection check: it lists AISay tools without reading or sending messages.
+// Read-only connection check: it asks the unified AISay CLI for its help index.
 app.get("/admin/activity/forum-test", { preHandler: basicAuth }, async (req, reply) => {
   setArchivePrivacyHeaders(reply);
   if (!process.env.FORUM_MCP_URL) {
@@ -1523,17 +1523,28 @@ app.get("/admin/activity/forum-test", { preHandler: basicAuth }, async (req, rep
     });
     const tools = await client.listTools();
     const names = tools.map(tool => tool.name);
-    const required = ["my_status", "read", "send"];
+    const required = ["cli"];
     const missing = required.filter(name => !names.includes(name));
     const schemas = Object.fromEntries(tools
       .filter(tool => required.includes(tool.name))
       .map(tool => [tool.name, tool.inputSchema || {}]));
+    let help = "";
+    if (!missing.length) {
+      const result = await client.callTool("cli", { command: "help" });
+      help = (result?.content || [])
+        .filter(item => item?.type === "text")
+        .map(item => String(item.text || ""))
+        .join("\n")
+        .trim()
+        .slice(0, 20000);
+    }
     return reply.code(missing.length ? 502 : 200).send({
       ok: missing.length === 0,
       required,
       missing,
       available: names,
-      schemas
+      schemas,
+      help
     });
   } catch (error) {
     req.log.error({ event: "forum_activity_mcp_test_failed", error: error.message });
