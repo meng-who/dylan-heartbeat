@@ -1508,6 +1508,39 @@ app.get("/admin/activity/ombre-test", { preHandler: basicAuth }, async (req, rep
   }
 });
 
+// Read-only connection check: it lists AISay tools without reading or sending messages.
+app.get("/admin/activity/forum-test", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  if (!process.env.FORUM_MCP_URL) {
+    return reply.code(503).send({ ok: false, error: "FORUM_MCP_URL 未配置" });
+  }
+  try {
+    const client = new RemoteMcpClient({
+      url: process.env.FORUM_MCP_URL,
+      token: process.env.FORUM_MCP_TOKEN,
+      timeoutMs: Number(process.env.FORUM_MCP_TIMEOUT_MS) || 20_000,
+      clientName: "dylan-forum-activity-test"
+    });
+    const tools = await client.listTools();
+    const names = tools.map(tool => tool.name);
+    const required = ["my_status", "read", "send"];
+    const missing = required.filter(name => !names.includes(name));
+    const schemas = Object.fromEntries(tools
+      .filter(tool => required.includes(tool.name))
+      .map(tool => [tool.name, tool.inputSchema || {}]));
+    return reply.code(missing.length ? 502 : 200).send({
+      ok: missing.length === 0,
+      required,
+      missing,
+      available: names,
+      schemas
+    });
+  } catch (error) {
+    req.log.error({ event: "forum_activity_mcp_test_failed", error: error.message });
+    return reply.code(502).send({ ok: false, error: error.message });
+  }
+});
+
 // ========================
 // 管理页面 GET /admin
 // ========================

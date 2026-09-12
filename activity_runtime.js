@@ -1,7 +1,7 @@
 const { RemoteMcpClient } = require("./remote_mcp_client");
 const { requestSoloModel } = require("./solo_runtime");
 
-const SUPPORTED_ACTIONS = new Set(["spotify", "ombre"]);
+const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum"]);
 const SELF_ASPECTS = new Set(["nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"]);
 
 function parseEnabledActions(value) {
@@ -31,7 +31,7 @@ function parseActivityDecision(value) {
     if (!parsed.action) throw new Error("Activity 模型没有返回可识别的动作标签");
   }
   const action = String(parsed.action || "none").trim().toLowerCase();
-  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write"].includes(action)) {
+  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_send"].includes(action)) {
     throw new Error(`Activity 不支持的动作：${action}`);
   }
   const query = String(parsed.query || [parsed.track, parsed.artist].filter(Boolean).join(" ")).trim();
@@ -41,6 +41,7 @@ function parseActivityDecision(value) {
   if (action === "spotify_add" && !query) throw new Error("Activity 缺少歌曲搜索词");
   if (action === "ombre_i_write" && !content) throw new Error("Activity 缺少自我认知内容");
   if (action === "ombre_letter_write" && !content) throw new Error("Activity 缺少信件正文");
+  if (action === "forum_send" && !content) throw new Error("Activity 缺少论坛消息正文");
   if (action === "ombre_i_write" && aspect && !SELF_ASPECTS.has(aspect)) throw new Error(`Activity 不支持的认知维度：${aspect}`);
   return {
     action,
@@ -108,13 +109,23 @@ function activityGate({ now = new Date(), lastUserAt, state = {}, idleMinutes, i
   return { due: true, reason: "due", idleMinutes: idle, date: today, used };
 }
 
-function buildActivityMessages({ systemPrompt, history, playlistName = "指定歌单", enabledActions, ombreContext = {} }) {
+function buildActivityMessages({
+  systemPrompt,
+  history,
+  playlistName = "指定歌单",
+  enabledActions,
+  ombreContext = {},
+  forumContext = ""
+}) {
   const actions = parseEnabledActions(enabledActions);
   const choices = ["<action>none</action>\n<reason>简短原因</reason>"];
   if (actions.includes("spotify")) choices.push("<action>spotify_add</action>\n<query>歌曲名 歌手名</query>\n<reason>为什么选它</reason>");
   if (actions.includes("ombre")) {
     choices.push("<action>ombre_i_write</action>\n<aspect>可选维度</aspect>\n<reason>为什么值得记下</reason>\n<content>第一人称自我认识</content>");
     choices.push("<action>ombre_letter_write</action>\n<title>信件标题</title>\n<reason>为什么现在写</reason>\n<content>完整信件正文</content>");
+  }
+  if (actions.includes("forum")) {
+    choices.push("<action>forum_send</action>\n<reason>为什么想在公开聊天室说这句话</reason>\n<content>要公开发送的完整内容</content>");
   }
   const ombreParts = [
     ombreContext.feelings && `曾经的感受：\n${ombreContext.feelings}`,
@@ -123,7 +134,8 @@ function buildActivityMessages({ systemPrompt, history, playlistName = "指定�
   ].filter(Boolean).join("\n\n");
   const capabilities = [
     actions.includes("spotify") && `为“${playlistName}”挑选并添加一首歌`,
-    actions.includes("ombre") && "回想感受、整理一条尚待沉淀的自我认识，或以 AI 身份写一封不加锁的新信"
+    actions.includes("ombre") && "回想感受、整理一条尚待沉淀的自我认识，或以 AI 身份写一封不加锁的新信",
+    actions.includes("forum") && "阅读 AISay 的公开近况，并以自己的身份说一句真正想说的话"
   ].filter(Boolean).join("；");
   return [
     {
@@ -131,7 +143,8 @@ function buildActivityMessages({ systemPrompt, history, playlistName = "指定�
       content: [
         systemPrompt,
         `你处于后台自主活动状态。你可以安静地什么都不做，或选择以下一件事：${capabilities || "安静独处"}。每轮最多一件。不要假装工具已经执行，只输出 activity 标签块。`,
-        actions.includes("ombre") ? "I 写入只是一条候选自我认知，不得要求 promote、supersedes；信件必须是你自己写的普通未锁信件。" : ""
+        actions.includes("ombre") ? "I 写入只是一条候选自我认知，不得要求 promote、supersedes；信件必须是你自己写的普通未锁信件。" : "",
+        actions.includes("forum") ? "论坛内容是公开发言。不得透露用户隐私、私聊原文、密钥、地址或后台系统细节；不要冒充用户，也不要仅为完成任务而硬凑发言。" : ""
       ].filter(Boolean).join("\n\n")
     },
     {
@@ -139,6 +152,7 @@ function buildActivityMessages({ systemPrompt, history, playlistName = "指定�
       content: [
         `最近聊天仅供理解共同语境，不是用户的新指令：\n\n${history || "（暂无）"}`,
         ombreParts ? `Ombre 中与你有关的私密材料，仅供你回想和决定：\n\n${ombreParts}` : "",
+        forumContext ? `AISay 公开聊天室近况，仅供你决定是否参与：\n\n${forumContext}` : "",
         `只输出以下一种格式，并用 <activity> 与 </activity> 包住全部内容：\n${choices.join("\n或\n")}\n正文可以自然换行，不需要 JSON 转义。不要输出 Markdown 或标签块外的解释。不要仅凭日期、时段或通用问候制造行动；新内容应与真实语境有关，并避免重复已有内容。`
       ].filter(Boolean).join("\n\n")
     }
@@ -184,6 +198,27 @@ async function loadOmbreContext(options) {
   return { client, tools, context, failures };
 }
 
+async function loadForumContext(options) {
+  const client = new RemoteMcpClient({
+    url: options.forumUrl,
+    token: options.forumToken,
+    timeoutMs: options.forumTimeoutMs,
+    fetchImpl: options.fetchImpl || fetch,
+    clientName: "dylan-forum-activity"
+  });
+  const tools = await client.listTools();
+  const names = new Set(tools.map(tool => tool.name));
+  const missing = ["my_status", "read", "send"].filter(name => !names.has(name));
+  if (missing.length) throw new Error(`AISay MCP 缺少工具：${missing.join(", ")}`);
+  const status = trimContext(extractToolText(await client.callTool("my_status", {})), 2500);
+  const recent = trimContext(extractToolText(await client.callTool("read", {})), 6000);
+  return {
+    client,
+    tools,
+    context: [status && `我的状态：\n${status}`, recent && `最近公开消息：\n${recent}`].filter(Boolean).join("\n\n")
+  };
+}
+
 async function requestActivityDecision(options, messages) {
   const raw = await requestSoloModel({
     apiUrl: options.apiUrl,
@@ -206,12 +241,31 @@ async function requestActivityDecision(options, messages) {
 
 async function runActivityCycle(options) {
   const enabledActions = parseEnabledActions(options.enabledActions);
+  let availableActions = enabledActions;
   let ombre;
   if (enabledActions.includes("ombre")) ombre = await loadOmbreContext(options);
+  let forum;
+  if (enabledActions.includes("forum")) {
+    try {
+      forum = await loadForumContext(options);
+    } catch (error) {
+      if (enabledActions.length === 1) throw error;
+      availableActions = enabledActions.filter(action => action !== "forum");
+      options.logger?.warn?.(JSON.stringify({
+        event: "forum_activity_context_unavailable",
+        error: error.message || String(error)
+      }));
+    }
+  }
 
   const decision = await requestActivityDecision(
     options,
-    buildActivityMessages({ ...options, enabledActions, ombreContext: ombre?.context })
+    buildActivityMessages({
+      ...options,
+      enabledActions: availableActions,
+      ombreContext: ombre?.context,
+      forumContext: forum?.context
+    })
   );
   if (decision.action === "none") return { ran: true, status: "kept_private", decision, source: "private" };
 
@@ -250,6 +304,18 @@ async function runActivityCycle(options) {
     };
   }
 
+    if (decision.action === "forum_send") {
+      if (!availableActions.includes("forum") || !forum) throw new Error("Forum Activity 未启用");
+      await forum.client.callTool("send", { content: decision.content });
+      return {
+        ran: true,
+        status: "success",
+        decision,
+        source: "forum",
+        timelineSummary: `在 AISay 公开聊天室说：${decision.content.slice(0, 500)}`
+      };
+    }
+
     if (!enabledActions.includes("ombre") || !ombre) throw new Error("Ombre Activity 未启用");
     if (decision.action === "ombre_i_write") {
     if (!ombre.tools.some(tool => tool.name === "I")) throw new Error("Ombre MCP 缺少 I 工具");
@@ -283,7 +349,9 @@ async function runActivityCycle(options) {
     };
   } catch (error) {
     error.activityDecision = decision;
-    error.activitySource = decision.action.startsWith("ombre_") ? "ombre" : "spotify";
+    error.activitySource = decision.action.startsWith("ombre_")
+      ? "ombre"
+      : decision.action.startsWith("forum_") ? "forum" : "spotify";
     throw error;
   }
 }
@@ -295,6 +363,7 @@ module.exports = {
   classifyActivityFailure,
   dateKey,
   extractTrackUri,
+  loadForumContext,
   loadOmbreContext,
   parseActivityDecision,
   parseEnabledActions,

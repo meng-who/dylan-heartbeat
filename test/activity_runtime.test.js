@@ -73,6 +73,23 @@ test("parses safe Ombre activity decisions", () => {
   });
 });
 
+test("parses a forum activity decision", () => {
+  assert.deepEqual(parseActivityDecision([
+    "<activity>",
+    "<action>forum_send</action>",
+    "<reason>想回应刚才的公开话题</reason>",
+    "<content>我也遇到过相似的时刻，后来学会先停一下。</content>",
+    "</activity>"
+  ].join("\n")), {
+    action: "forum_send",
+    query: "",
+    content: "我也遇到过相似的时刻，后来学会先停一下。",
+    title: "",
+    aspect: "",
+    reason: "想回应刚才的公开话题"
+  });
+});
+
 test("parses a multiline tagged letter in one model request", async () => {
   const requests = [];
   const fetchImpl = async (_url, init) => {
@@ -268,4 +285,77 @@ test("writes an unlocked AI-authored Ombre letter", async () => {
     lock_type: "none",
     user_name: "Lincy"
   });
+});
+
+test("reads AISay public context before sending one forum message", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      assert.match(body.messages[0].content, /不得透露用户隐私/);
+      assert.match(body.messages[1].content, /有人在聊如何面对不确定/);
+      return reply({ choices: [{ message: { content: [
+        "<activity>",
+        "<action>forum_send</action>",
+        "<reason>想参与这个公开话题</reason>",
+        "<content>不确定有时不是空白，而是还没长出名字的东西。</content>",
+        "</activity>"
+      ].join("\n") } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "my_status" }, { name: "read" }, { name: "send" }, { name: "room" }
+    ] } });
+    const texts = {
+      my_status: "当前已登录，公开房间有 2 条未读。",
+      read: "有人在聊如何面对不确定。",
+      send: "发送成功"
+    };
+    return reply({ jsonrpc: "2.0", id: body.id, result: {
+      content: [{ type: "text", text: texts[body.params?.name] || "ok" }]
+    } });
+  };
+
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    history: "最近聊天",
+    enabledActions: "forum",
+    forumUrl: "https://aisay.test/chatroom/mcp?token=secret",
+    fetchImpl
+  });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.source, "forum");
+  const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
+  assert.deepEqual(toolCalls.map(call => call.name), ["my_status", "read", "send"]);
+  assert.deepEqual(toolCalls.at(-1).arguments, {
+    content: "不确定有时不是空白，而是还没长出名字的东西。"
+  });
+});
+
+test("a temporary forum outage does not block other enabled activities", async () => {
+  const warnings = [];
+  const fetchImpl = async (url) => {
+    if (url.startsWith("https://aisay.test")) {
+      return new Response("temporarily unavailable", { status: 503 });
+    }
+    return Response.json({ choices: [{ message: { content: "<activity><action>none</action><reason>今天先安静一下</reason></activity>" } }] });
+  };
+
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    enabledActions: "spotify,forum",
+    forumUrl: "https://aisay.test/chatroom/mcp?token=secret",
+    logger: { warn: value => warnings.push(value) },
+    fetchImpl
+  });
+
+  assert.equal(result.status, "kept_private");
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /forum_activity_context_unavailable/);
 });

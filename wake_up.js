@@ -993,6 +993,7 @@ async function runActivityCheck() {
   const required = ["TARGET_API_URL", "TARGET_API_KEY"];
   if (enabledActions.includes("spotify")) required.push("SPOTIFY_MCP_URL", "SPOTIFY_PLAYLIST_ID");
   if (enabledActions.includes("ombre")) required.push("OMBRE_MCP_URL", "OMBRE_MCP_TOKEN");
+  if (enabledActions.includes("forum")) required.push("FORUM_MCP_URL");
   if (!enabledActions.length) {
     console.warn(JSON.stringify({ event: "activity_config_missing", variables: ["AUTONOMY_ACTIONS"] }));
     return { ran: false, reason: "not_configured" };
@@ -1081,7 +1082,10 @@ async function runActivityCheck() {
       ombreToken: process.env.OMBRE_MCP_TOKEN,
       ombreTimeoutMs: readPositiveTimeout("OMBRE_MCP_TIMEOUT_MS", 12_000),
       aiName: process.env.AI_DISPLAY_NAME || "AI",
-      userName: process.env.USER_DISPLAY_NAME || ""
+      userName: process.env.USER_DISPLAY_NAME || "",
+      forumUrl: process.env.FORUM_MCP_URL,
+      forumToken: process.env.FORUM_MCP_TOKEN,
+      forumTimeoutMs: readPositiveTimeout("FORUM_MCP_TIMEOUT_MS", 20_000)
     });
     if (result.trackUri && result.status === "success") {
       nextState.recent_track_uris.push(result.trackUri);
