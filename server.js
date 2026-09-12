@@ -1571,6 +1571,49 @@ app.get("/admin/activity/forum-test", { preHandler: basicAuth }, async (req, rep
   }
 });
 
+// Read-only connection check: it lists available games but never starts a game or touches the account.
+app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  if (!process.env.GAMES_MCP_URL) {
+    return reply.code(503).send({ ok: false, error: "GAMES_MCP_URL 未配置" });
+  }
+  try {
+    const client = new RemoteMcpClient({
+      url: process.env.GAMES_MCP_URL,
+      timeoutMs: Number(process.env.GAMES_MCP_TIMEOUT_MS) || 20_000,
+      clientName: "dylan-games-activity-test"
+    });
+    const tools = await client.listTools();
+    const names = tools.map(tool => tool.name);
+    const required = ["list_games", "get_guide", "play"];
+    const missing = required.filter(name => !names.includes(name));
+    const schemas = Object.fromEntries(tools
+      .filter(tool => required.includes(tool.name))
+      .map(tool => [tool.name, tool.inputSchema || {}]));
+    let games = "";
+    if (!missing.length) {
+      const result = await client.callTool("list_games", {});
+      games = (result?.content || [])
+        .filter(item => item?.type === "text")
+        .map(item => String(item.text || ""))
+        .join("\n")
+        .trim()
+        .slice(0, 30000);
+    }
+    return reply.code(missing.length ? 502 : 200).send({
+      ok: missing.length === 0,
+      required,
+      missing,
+      available: names,
+      schemas,
+      games
+    });
+  } catch (error) {
+    req.log.error({ event: "games_activity_mcp_test_failed", error: error.message });
+    return reply.code(502).send({ ok: false, error: error.message });
+  }
+});
+
 // ========================
 // 管理页面 GET /admin
 // ========================
