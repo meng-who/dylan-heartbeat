@@ -1155,6 +1155,8 @@ async function runActivityCheck() {
     title: result.decision?.title || "",
     aspect: result.decision?.aspect || "",
     track_uri: result.trackUri || "",
+    room_id: result.roomId || result.decision?.roomId || "",
+    reply_to_message_id: result.replyToMessageId || result.decision?.replyToMessageId || 0,
     reason: result.reason || "",
     failure_kind: result.failureKind || "",
     daily_slot_charged: budgetCharged

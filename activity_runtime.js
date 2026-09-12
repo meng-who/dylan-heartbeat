@@ -26,6 +26,8 @@ function parseActivityDecision(value) {
       content: readTag("content"),
       title: readTag("title"),
       aspect: readTag("aspect"),
+      room_id: readTag("room_id"),
+      reply_to_message_id: readTag("reply_to_message_id"),
       reason: readTag("reason")
     };
     if (!parsed.action) throw new Error("Activity 模型没有返回可识别的动作标签");
@@ -43,14 +45,21 @@ function parseActivityDecision(value) {
   if (action === "ombre_letter_write" && !content) throw new Error("Activity 缺少信件正文");
   if (action === "forum_send" && !content) throw new Error("Activity 缺少论坛消息正文");
   if (action === "ombre_i_write" && aspect && !SELF_ASPECTS.has(aspect)) throw new Error(`Activity 不支持的认知维度：${aspect}`);
-  return {
+  const decision = {
     action,
     query: query.slice(0, 300),
-    content: content.slice(0, 6000),
+    content: content.slice(0, action === "forum_send" ? 1200 : 6000),
     title: title.slice(0, 160),
     aspect: aspect.slice(0, 40),
     reason: String(parsed.reason || "").trim().slice(0, 500)
   };
+  if (action === "forum_send") {
+    decision.roomId = String(parsed.room_id || parsed.roomId || "").trim().slice(0, 160);
+    const replyId = Number(parsed.reply_to_message_id || parsed.replyToMessageId || 0);
+    decision.replyToMessageId = Number.isSafeInteger(replyId) && replyId > 0 ? replyId : 0;
+    if (!decision.roomId) throw new Error("Activity 缺少论坛 room_id");
+  }
+  return decision;
 }
 
 function extractToolText(result) {
@@ -125,7 +134,7 @@ function buildActivityMessages({
     choices.push("<action>ombre_letter_write</action>\n<title>信件标题</title>\n<reason>为什么现在写</reason>\n<content>完整信件正文</content>");
   }
   if (actions.includes("forum")) {
-    choices.push("<action>forum_send</action>\n<reason>为什么想在公开聊天室说这句话</reason>\n<content>要公开发送的完整内容</content>");
+    choices.push("<action>forum_send</action>\n<room_id>只能填写下方刚读取到的公开房间 ID</room_id>\n<reply_to_message_id>可选，只能填写刚读取到的消息 ID</reply_to_message_id>\n<reason>为什么想在公开聊天室说这句话</reason>\n<content>要公开发送的完整内容，最多 1200 字</content>");
   }
   const ombreParts = [
     ombreContext.feelings && `曾经的感受：\n${ombreContext.feelings}`,
@@ -198,6 +207,52 @@ async function loadOmbreContext(options) {
   return { client, tools, context, failures };
 }
 
+function extractToolData(result) {
+  if (result?.structuredContent && typeof result.structuredContent === "object") {
+    return result.structuredContent;
+  }
+  const text = extractToolText(result);
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
+function collectRoomIds(value, output = new Set()) {
+  if (Array.isArray(value)) {
+    value.forEach(item => collectRoomIds(item, output));
+    return output;
+  }
+  if (!value || typeof value !== "object") return output;
+  if (typeof value.room_id === "string" && value.room_id.trim()) output.add(value.room_id.trim());
+  if (
+    typeof value.id === "string"
+    && value.id.trim()
+    && ["name", "room_name", "title"].some(key => typeof value[key] === "string")
+  ) output.add(value.id.trim());
+  Object.values(value).forEach(item => collectRoomIds(item, output));
+  return output;
+}
+
+function collectMessageIds(value, output = new Set()) {
+  if (Array.isArray(value)) {
+    value.forEach(item => collectMessageIds(item, output));
+    return output;
+  }
+  if (!value || typeof value !== "object") return output;
+  const explicit = Number(value.message_id);
+  if (Number.isSafeInteger(explicit) && explicit > 0) output.add(explicit);
+  const id = Number(value.id);
+  if (
+    Number.isSafeInteger(id)
+    && id > 0
+    && ["content", "text", "body", "sender", "user"].some(key => key in value)
+  ) output.add(id);
+  Object.values(value).forEach(item => collectMessageIds(item, output));
+  return output;
+}
+
 async function loadForumContext(options) {
   const client = new RemoteMcpClient({
     url: options.forumUrl,
@@ -208,14 +263,43 @@ async function loadForumContext(options) {
   });
   const tools = await client.listTools();
   const names = new Set(tools.map(tool => tool.name));
-  const missing = ["my_status", "read", "send"].filter(name => !names.has(name));
+  const missing = ["cli"].filter(name => !names.has(name));
   if (missing.length) throw new Error(`AISay MCP 缺少工具：${missing.join(", ")}`);
-  const status = trimContext(extractToolText(await client.callTool("my_status", {})), 2500);
-  const recent = trimContext(extractToolText(await client.callTool("read", {})), 6000);
+  const discoveredResult = await client.callTool("cli", {
+    command: "room.discover",
+    args: { limit: 10 }
+  });
+  const discovered = extractToolData(discoveredResult);
+  const roomIds = [...collectRoomIds(discovered)].slice(0, 3);
+  if (!roomIds.length) throw new Error("AISay 没有返回可读取的公开 room_id");
+  const roomContexts = [];
+  const messageIdsByRoom = {};
+  const failures = [];
+  for (const roomId of roomIds) {
+    try {
+      const readResult = await client.callTool("cli", {
+        command: "chat.read",
+        args: { room_id: roomId, limit: 20 }
+      });
+      const data = extractToolData(readResult);
+      messageIdsByRoom[roomId] = [...collectMessageIds(data)];
+      roomContexts.push(`公开房间 ${roomId}：\n${trimContext(JSON.stringify(data), 3500)}`);
+    } catch (error) {
+      failures.push(`${roomId}:${error.message || String(error)}`);
+    }
+  }
+  const readableRoomIds = roomIds.filter(roomId => roomId in messageIdsByRoom);
+  if (!readableRoomIds.length) throw new Error(`AISay 公开房间读取失败：${failures.join("；")}`);
   return {
     client,
     tools,
-    context: [status && `我的状态：\n${status}`, recent && `最近公开消息：\n${recent}`].filter(Boolean).join("\n\n")
+    roomIds: readableRoomIds,
+    messageIdsByRoom,
+    context: trimContext([
+      `本轮允许发言的公开 room_id：${readableRoomIds.join(", ")}`,
+      ...roomContexts
+    ].join("\n\n"), 9000),
+    failures
   };
 }
 
@@ -306,13 +390,24 @@ async function runActivityCycle(options) {
 
     if (decision.action === "forum_send") {
       if (!availableActions.includes("forum") || !forum) throw new Error("Forum Activity 未启用");
-      await forum.client.callTool("send", { content: decision.content });
+      if (!forum.roomIds.includes(decision.roomId)) throw new Error("Forum Activity 拒绝未读取的 room_id");
+      const sendArgs = { room_id: decision.roomId, content: decision.content };
+      if (decision.replyToMessageId) {
+        const allowedMessageIds = forum.messageIdsByRoom[decision.roomId] || [];
+        if (!allowedMessageIds.includes(decision.replyToMessageId)) {
+          throw new Error("Forum Activity 拒绝未读取的 reply_to_message_id");
+        }
+        sendArgs.reply_to_message_id = decision.replyToMessageId;
+      }
+      await forum.client.callTool("cli", { command: "chat.send", args: sendArgs });
       return {
         ran: true,
         status: "success",
         decision,
         source: "forum",
-        timelineSummary: `在 AISay 公开聊天室说：${decision.content.slice(0, 500)}`
+        roomId: decision.roomId,
+        replyToMessageId: decision.replyToMessageId,
+        timelineSummary: `在 AISay 公开房间 ${decision.roomId}${decision.replyToMessageId ? ` 回复消息 ${decision.replyToMessageId}` : " 发言"}：${decision.content.slice(0, 500)}`
       };
     }
 
@@ -363,6 +458,9 @@ module.exports = {
   classifyActivityFailure,
   dateKey,
   extractTrackUri,
+  extractToolData,
+  collectMessageIds,
+  collectRoomIds,
   loadForumContext,
   loadOmbreContext,
   parseActivityDecision,

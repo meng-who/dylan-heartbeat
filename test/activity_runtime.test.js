@@ -77,6 +77,8 @@ test("parses a forum activity decision", () => {
   assert.deepEqual(parseActivityDecision([
     "<activity>",
     "<action>forum_send</action>",
+    "<room_id>public-room-1</room_id>",
+    "<reply_to_message_id>42</reply_to_message_id>",
     "<reason>想回应刚才的公开话题</reason>",
     "<content>我也遇到过相似的时刻，后来学会先停一下。</content>",
     "</activity>"
@@ -86,7 +88,9 @@ test("parses a forum activity decision", () => {
     content: "我也遇到过相似的时刻，后来学会先停一下。",
     title: "",
     aspect: "",
-    reason: "想回应刚才的公开话题"
+    reason: "想回应刚才的公开话题",
+    roomId: "public-room-1",
+    replyToMessageId: 42
   });
 });
 
@@ -299,6 +303,8 @@ test("reads AISay public context before sending one forum message", async () => 
       return reply({ choices: [{ message: { content: [
         "<activity>",
         "<action>forum_send</action>",
+        "<room_id>public-room-1</room_id>",
+        "<reply_to_message_id>42</reply_to_message_id>",
         "<reason>想参与这个公开话题</reason>",
         "<content>不确定有时不是空白，而是还没长出名字的东西。</content>",
         "</activity>"
@@ -307,15 +313,16 @@ test("reads AISay public context before sending one forum message", async () => 
     if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
     if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
     if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
-      { name: "my_status" }, { name: "read" }, { name: "send" }, { name: "room" }
+      { name: "cli" }
     ] } });
+    const command = body.params?.arguments?.command;
     const texts = {
-      my_status: "当前已登录，公开房间有 2 条未读。",
-      read: "有人在聊如何面对不确定。",
-      send: "发送成功"
+      "room.discover": JSON.stringify({ rooms: [{ room_id: "public-room-1", name: "广场茶铺" }] }),
+      "chat.read": JSON.stringify({ messages: [{ id: 42, sender: "路人", content: "有人在聊如何面对不确定。" }] }),
+      "chat.send": JSON.stringify({ ok: true, message_id: 43 })
     };
     return reply({ jsonrpc: "2.0", id: body.id, result: {
-      content: [{ type: "text", text: texts[body.params?.name] || "ok" }]
+      content: [{ type: "text", text: texts[command] || "ok" }]
     } });
   };
 
@@ -331,9 +338,14 @@ test("reads AISay public context before sending one forum message", async () => 
   assert.equal(result.status, "success");
   assert.equal(result.source, "forum");
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
-  assert.deepEqual(toolCalls.map(call => call.name), ["my_status", "read", "send"]);
+  assert.deepEqual(toolCalls.map(call => call.arguments.command), ["room.discover", "chat.read", "chat.send"]);
   assert.deepEqual(toolCalls.at(-1).arguments, {
-    content: "不确定有时不是空白，而是还没长出名字的东西。"
+    command: "chat.send",
+    args: {
+      room_id: "public-room-1",
+      content: "不确定有时不是空白，而是还没长出名字的东西。",
+      reply_to_message_id: 42
+    }
   });
 });
 
