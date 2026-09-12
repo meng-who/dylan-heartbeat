@@ -356,12 +356,14 @@ Solo 是独立于普通聊天和主动唤醒的后台体验。Pulse 会缓慢积
 
 ```env
 SOLO_ENABLED=true
+SOLO_MODEL_NAME=独处专用主模型（可选）
+SOLO_BACKUP_MODEL_NAME=独处专用备用模型（可选）
 OMBRE_MCP_URL=https://你的-ombre服务.onrender.com/mcp
 OMBRE_MCP_TOKEN=你的Ombre静态Token
 OMBRE_MCP_TIMEOUT_MS=12000
 ```
 
-先保持 `SOLO_ENABLED=false`，等 Ombre 地址与 Token 填好后再改成 `true`。Token 只放 Render Secret，不要发送到聊天或提交 GitHub。欲望阈值、离开多久才触发、冷却时间和总开关，可在 `/pulse` 身体状态面板里修改。
+先保持 `SOLO_ENABLED=false`，等 Ombre 地址与 Token 填好后再改成 `true`。Token 只放 Render Secret，不要发送到聊天或提交 GitHub。`SOLO_MODEL_NAME` 与 `SOLO_BACKUP_MODEL_NAME` 留空时会沿用普通 `MODEL_NAME` 与 `BACKUP_MODEL_NAME`。欲望阈值、离开多久才触发、冷却时间和总开关，可在 `/pulse` 身体状态面板里修改。Solo 无论成功还是技术失败都会写入加密 Archive，便于和 Pulse 身体事件按时间核对。
 
 ## 🎧 自主活动（实验功能）
 

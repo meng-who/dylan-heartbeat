@@ -926,6 +926,8 @@ async function runSoloCheck() {
     return current?.time?.getTime?.() || NaN;
   };
 
+  const soloModel = String(process.env.SOLO_MODEL_NAME || process.env.MODEL_NAME || "").trim();
+  const soloBackupModel = String(process.env.SOLO_BACKUP_MODEL_NAME || process.env.BACKUP_MODEL_NAME || "").trim();
   const result = await runSoloCycle({
     pulseBaseUrl: process.env.PULSE_WORKER_URL,
     pulseClientKey: process.env.PULSE_CLIENT_KEY,
@@ -935,8 +937,8 @@ async function runSoloCheck() {
     ombreTimeoutMs: readPositiveTimeout("OMBRE_MCP_TIMEOUT_MS", 12_000),
     apiUrl: process.env.TARGET_API_URL,
     apiKey: process.env.TARGET_API_KEY,
-    model: process.env.MODEL_NAME,
-    backupModel: process.env.BACKUP_MODEL_NAME,
+    model: soloModel,
+    backupModel: soloBackupModel,
     modelTimeoutMs: WAKE_UPSTREAM_TIMEOUT_MS,
     lastUserAt: lastUserActivity.time.toISOString(),
     messages: getWakeHistoryMessages(messages),

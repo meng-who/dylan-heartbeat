@@ -306,6 +306,25 @@ async function runSoloCycle(options) {
         errorCode
       });
     } catch {}
+    if (options.archiveSolo) {
+      try {
+        await options.archiveSolo({
+          kind: "solo",
+          status: "failed",
+          model: options.model || "",
+          backup_model: options.backupModel || "",
+          mode,
+          recall_used: recallUsed,
+          summary: "独处尝试未完成",
+          reason: String(error?.message || error).slice(0, 1200),
+          error_code: errorCode,
+          attempted_models: error?.attemptedModels || [],
+          final_model: error?.finalModel || ""
+        });
+      } catch (archiveError) {
+        options.logger?.error?.(JSON.stringify({ event: "solo_failure_archive_failed", error: String(archiveError?.message || archiveError) }));
+      }
+    }
     throw error;
   }
 }

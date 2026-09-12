@@ -158,6 +158,7 @@ test("retries once when the Solo model returns malformed JSON", async () => {
 
 test("marks persistent model format failures as technical instead of user return", async () => {
   let cancelBody;
+  let archivedFailure;
   const fetchImpl = async (url, init) => {
     const body = JSON.parse(init.body);
     if (String(url).endsWith("/api/solo/claim")) {
@@ -179,9 +180,13 @@ test("marks persistent model format failures as technical instead of user return
     pulseBaseUrl: "https://pulse.example.com", pulseClientKey: "p",
     apiUrl: "https://model.example.com/chat", apiKey: "k", model: "m",
     lastUserAt: 0, messages: [], systemPrompt: "AI", getLatestUserAt: async () => 0,
-    fetchImpl, logger: { warn() {} }
+    fetchImpl, logger: { warn() {} }, archiveSolo: async record => { archivedFailure = record; return { saved: true }; }
   }));
 
   assert.equal(cancelBody.reason, "technical_failure");
   assert.equal(cancelBody.errorCode, "invalid_model_output");
+  assert.equal(archivedFailure.kind, "solo");
+  assert.equal(archivedFailure.status, "failed");
+  assert.equal(archivedFailure.error_code, "invalid_model_output");
+  assert.equal(archivedFailure.summary, "独处尝试未完成");
 });
