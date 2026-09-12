@@ -3,9 +3,11 @@ const test = require("node:test");
 
 const {
   activityGate,
+  classifyActivityFailure,
   parseActivityDecision,
   requestActivityDecision,
-  runActivityCycle
+  runActivityCycle,
+  shouldChargeActivityBudget
 } = require("../activity_runtime");
 
 test("activity budget is independent from the ordinary wake threshold", () => {
@@ -39,6 +41,25 @@ test("parses a fenced Spotify activity decision", () => {
     aspect: "",
     reason: "fit"
   });
+});
+
+test("model-side failures do not consume the daily activity budget", () => {
+  const requestError = new Error("Solo 模型请求失败 HTTP 503");
+  requestError.attemptedModels = ["primary", "backup"];
+  assert.equal(classifyActivityFailure(requestError), "model_request");
+  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "model_request" }), false);
+
+  const outputError = new Error("Activity 模型没有返回可识别的动作标签");
+  outputError.activityStage = "model_output";
+  assert.equal(classifyActivityFailure(outputError), "model_output");
+  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "model_output" }), false);
+});
+
+test("completed decisions and tool failures still consume a decision slot", () => {
+  assert.equal(shouldChargeActivityBudget({ status: "success" }), true);
+  assert.equal(shouldChargeActivityBudget({ status: "kept_private" }), true);
+  assert.equal(shouldChargeActivityBudget({ status: "skipped" }), true);
+  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "tool_execution" }), true);
 });
 
 test("parses safe Ombre activity decisions", () => {

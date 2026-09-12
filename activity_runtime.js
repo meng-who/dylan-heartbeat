@@ -79,6 +79,20 @@ function dateKey(date, timeZone) {
   }).format(date);
 }
 
+function classifyActivityFailure(error) {
+  const message = String(error?.message || error || "");
+  if (error?.activityStage === "model_output") return "model_output";
+  if (
+    Array.isArray(error?.attemptedModels)
+    || /Solo 模型请求失败|fetch failed|ECONN|socket|network|timeout|timed out|abort/i.test(message)
+  ) return "model_request";
+  return "tool_execution";
+}
+
+function shouldChargeActivityBudget(result) {
+  return !(result?.status === "failed" && ["model_request", "model_output"].includes(result.failureKind));
+}
+
 function activityGate({ now = new Date(), lastUserAt, state = {}, idleMinutes, intervalMinutes, maxPerDay, timeZone }) {
   const lastUserMs = new Date(lastUserAt).getTime();
   if (!Number.isFinite(lastUserMs)) return { due: false, reason: "user_activity_missing" };
@@ -278,6 +292,7 @@ module.exports = {
   activityGate,
   buildActivityMessages,
   buildFeelingQuery,
+  classifyActivityFailure,
   dateKey,
   extractTrackUri,
   loadOmbreContext,
@@ -285,5 +300,6 @@ module.exports = {
   parseEnabledActions,
   requestActivityDecision,
   resolvePlaylistAddAction,
-  runActivityCycle
+  runActivityCycle,
+  shouldChargeActivityBudget
 };

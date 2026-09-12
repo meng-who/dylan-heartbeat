@@ -397,7 +397,7 @@ SPOTIFY_PLAYLIST_NAME=歌单显示名称
 - `AUTONOMY_CHECK_INTERVAL_MINUTES`：Activity 自己的条件检查频率，默认 15 分钟；检查本身不调用模型。
 - `AUTONOMY_IDLE_MINUTES`：用户离开多久后才允许活动。
 - `AUTONOMY_INTERVAL_MINUTES`：两次模型活动之间的最短间隔。
-- `AUTONOMY_MAX_ACTIONS_PER_DAY`：每天最多占用多少次模型活动预算；模型选择什么都不做也计一次，避免反复询问模型。
+- `AUTONOMY_MAX_ACTIONS_PER_DAY`：每天最多占用多少次模型活动预算；模型选择什么都不做、重复跳过或工具执行失败仍计一次，避免反复询问或重复写入。模型请求失败、超时或输出格式错误会记录到 Archive，但会退还每日名额，并等待 `AUTONOMY_INTERVAL_MINUTES` 后再尝试。
 - `SPOTIFY_PLAYLIST_ID`：唯一允许写入的歌单。添加歌曲不需要 Spotify 设备在线，也不需要设备 ID。
 - Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
 

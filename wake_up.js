@@ -14,7 +14,13 @@ const { isSpecialEventContent } = require("./special_events");
 const { findSimilarRecentPush, getRecentSentPushes } = require("./wake_dedup");
 const { appendWakeArchive, buildWakeArchiveOutcome } = require("./wake_archive");
 const { runSoloCycle } = require("./solo_runtime");
-const { activityGate, parseEnabledActions, runActivityCycle } = require("./activity_runtime");
+const {
+  activityGate,
+  classifyActivityFailure,
+  parseEnabledActions,
+  runActivityCycle,
+  shouldChargeActivityBudget
+} = require("./activity_runtime");
 const {
   formatDateTimeInTimeZone,
   getChineseDayPeriod,
@@ -1091,9 +1097,24 @@ async function runActivityCheck() {
         : error.message || String(error),
       decision: error.activityDecision || (invalidModelOutput ? { action: "model_decision" } : undefined),
       source: error.activitySource || (invalidModelOutput ? "model" : "activity"),
+      failureKind: classifyActivityFailure(error),
       attemptedModels: error.attemptedModels || [],
       finalModel: error.finalModel || ""
     };
+  }
+
+  const budgetCharged = shouldChargeActivityBudget(result);
+  if (!budgetCharged) {
+    // Keep last_run_at as a cooldown, but return the daily slot after model-side failures.
+    nextState.count = gate.used;
+    nextState.last_model_failure_at = now.toISOString();
+    saveActivityState(nextState);
+    console.warn(JSON.stringify({
+      event: "activity_daily_slot_refunded",
+      failure_kind: result.failureKind,
+      daily_count: nextState.count,
+      retry_after_minutes: readNumberEnv("AUTONOMY_INTERVAL_MINUTES", 180, { min: 1 })
+    }));
   }
 
   if (result.status === "success") {
@@ -1130,7 +1151,9 @@ async function runActivityCheck() {
     title: result.decision?.title || "",
     aspect: result.decision?.aspect || "",
     track_uri: result.trackUri || "",
-    reason: result.reason || ""
+    reason: result.reason || "",
+    failure_kind: result.failureKind || "",
+    daily_slot_charged: budgetCharged
   };
   try {
     const archived = appendWakeArchive(archiveRecord);
@@ -1148,7 +1171,8 @@ async function runActivityCheck() {
     status: result.status,
     action: result.decision?.action || "unknown",
     track_uri: result.trackUri || "",
-    reason: result.reason || result.decision?.reason || ""
+    reason: result.reason || result.decision?.reason || "",
+    daily_slot_charged: budgetCharged
   }));
   return { ...result, ran: true };
 }
