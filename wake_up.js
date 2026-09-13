@@ -1034,7 +1034,8 @@ async function runActivityCheck() {
     date: gate.date,
     count: gate.used + 1,
     last_run_at: now.toISOString(),
-    recent_track_uris: Array.isArray(state.recent_track_uris) ? state.recent_track_uris.slice(-99) : []
+    recent_track_uris: Array.isArray(state.recent_track_uris) ? state.recent_track_uris.slice(-99) : [],
+    recent_track_queries: Array.isArray(state.recent_track_queries) ? state.recent_track_queries.slice(-99) : []
   };
   saveActivityState(nextState);
   console.log(JSON.stringify({
@@ -1080,6 +1081,7 @@ async function runActivityCheck() {
       spotifyTimeoutMs: readPositiveTimeout("SPOTIFY_MCP_TIMEOUT_MS", 20_000),
       playlistId: process.env.SPOTIFY_PLAYLIST_ID,
       recentTrackUris: nextState.recent_track_uris,
+      recentTrackQueries: nextState.recent_track_queries,
       ombreUrl: process.env.OMBRE_MCP_URL,
       ombreToken: process.env.OMBRE_MCP_TOKEN,
       ombreTimeoutMs: readPositiveTimeout("OMBRE_MCP_TIMEOUT_MS", 12_000),
@@ -1093,6 +1095,7 @@ async function runActivityCheck() {
     });
     if (result.trackUri && result.status === "success") {
       nextState.recent_track_uris.push(result.trackUri);
+      if (result.decision?.query) nextState.recent_track_queries.push(result.decision.query);
       saveActivityState(nextState);
     }
   } catch (error) {

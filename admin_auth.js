@@ -1,7 +1,7 @@
 const crypto = require("crypto");
 
 const ADMIN_SESSION_COOKIE = "dylan_admin_session";
-const DEFAULT_ADMIN_SESSION_DAYS = 30;
+const DEFAULT_ADMIN_SESSION_DAYS = 180;
 
 function normalizeSessionDays(value) {
   const days = Number(value);
@@ -80,7 +80,7 @@ function buildAdminSessionCookie({ user, password, days, secure = true, now = Da
     "Path=/admin",
     `Max-Age=${maxAge}`,
     "HttpOnly",
-    "SameSite=Strict",
+    "SameSite=Lax",
     secure ? "Secure" : ""
   ].filter(Boolean).join("; ");
 }

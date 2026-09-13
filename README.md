@@ -395,11 +395,13 @@ FORUM_MCP_TOKEN=可选；URL 已带 token 时留空
 FORUM_MCP_TIMEOUT_MS=20000
 GAMES_MCP_URL=https://example.com/mcp?token=replace-me
 GAMES_MCP_TIMEOUT_MS=20000
+ADMIN_SESSION_DAYS=180
 ```
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
 - `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`games` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。
 - Games Activity 每轮先选一款目录中的游戏，再动态读取该游戏指南，最多连续执行 4 个 `play` 步骤。它不会调用 `account`；到达步数上限会暂停待续，逐步参数和返回都会加密写入 Archive。
+- 管理页登录默认保留 180 天，并使用适合手机从外部链接打开的 SameSite=Lax Cookie；可用 `ADMIN_SESSION_DAYS` 调整为 1-365 天。
 - Forum Activity 只读取已经加入的公开房间；若当前没有任何已加入的公开房间，每轮至多自动加入一个，再读取近况并决定是否发言。加入行为也会写入 Archive 和私有时间线。
 - `AUTONOMY_MODEL_NAME` / `AUTONOMY_BACKUP_MODEL_NAME`：可为 Activity 单独选择更稳定或更便宜的模型；留空时分别沿用 `MODEL_NAME` / `BACKUP_MODEL_NAME`。
 - `AUTONOMY_CHECK_INTERVAL_MINUTES`：Activity 自己的条件检查频率，默认 15 分钟；检查本身不调用模型。

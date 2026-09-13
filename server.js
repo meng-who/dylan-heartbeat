@@ -501,12 +501,26 @@ function stripPosition(messages) {
   return messages.map(({ position, ...rest }) => rest);
 }
 
+function selectAutomationEvents(events) {
+  const maxEvents = readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10);
+  const maxActivityEvents = readPositiveIntegerEnv("MAX_INJECTED_ACTIVITY_EVENTS", 8);
+  const indexedEvents = events.map((event, index) => ({ event, index }));
+  const recentEvents = indexedEvents.slice(-maxEvents);
+  const recentActivityEvents = indexedEvents
+    .filter(({ event }) => normalizeContentToText(event.content).includes("自主活动："))
+    .slice(-maxActivityEvents);
+  const selectedIndexes = new Set([...recentEvents, ...recentActivityEvents].map(({ index }) => index));
+  const selectedEvents = indexedEvents
+    .filter(({ index }) => selectedIndexes.has(index))
+    .map(({ event }) => event);
+  return selectedEvents;
+}
+
 function addAutomationEventContext(messages, events) {
   if (!readBooleanEnv("INJECT_WAKE_EVENTS", true) || events.length === 0) return messages;
 
-  const maxEvents = readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10);
-  const recentEvents = events.slice(-maxEvents);
-  const eventLog = recentEvents
+  const selectedEvents = selectAutomationEvents(events);
+  const eventLog = selectedEvents
     .map((event, index) => `${index + 1}. ${normalizeContentToText(event.content).trim()}`)
     .join("\n");
   const note = [
@@ -793,7 +807,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       })
     );
 
-    console.log("本次注入的特殊事件数量:", readBooleanEnv("INJECT_WAKE_EVENTS", true) ? Math.min(oldEvents.length, readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10)) : 0);
+    console.log("本次注入的特殊事件数量:", readBooleanEnv("INJECT_WAKE_EVENTS", true) ? selectAutomationEvents(oldEvents).length : 0);
     addAutomationEventContext(llmMessages, oldEvents);
 
     requestStage = "pulse_prepare";
@@ -1492,11 +1506,15 @@ app.get("/admin/activity/spotify-test", { preHandler: basicAuth }, async (req, r
     const names = tools.map(tool => tool.name);
     const required = ["spotify_search", "spotify_playlist"];
     const missing = required.filter(name => !names.includes(name));
+    const schemas = Object.fromEntries(tools
+      .filter(tool => required.includes(tool.name))
+      .map(tool => [tool.name, tool.inputSchema || {}]));
     return reply.code(missing.length ? 502 : 200).send({
       ok: missing.length === 0,
       required,
       missing,
-      available: names
+      available: names,
+      schemas
     });
   } catch (error) {
     req.log.error({ event: "spotify_mcp_test_failed", error: error.message });

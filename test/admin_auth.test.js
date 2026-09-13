@@ -21,8 +21,13 @@ test("accepts Basic auth and creates a persistent secure admin cookie", () => {
   assert.match(cookie, new RegExp(`^${ADMIN_SESSION_COOKIE}=`));
   assert.match(cookie, /Max-Age=2592000/);
   assert.match(cookie, /HttpOnly/);
-  assert.match(cookie, /SameSite=Strict/);
+  assert.match(cookie, /SameSite=Lax/);
   assert.match(cookie, /Secure/);
+});
+
+test("uses a six-month mobile session by default", () => {
+  const cookie = buildAdminSessionCookie({ ...credentials, secure: true, now: 0 });
+  assert.match(cookie, /Max-Age=15552000/);
 });
 
 test("accepts an unexpired signed admin session without Basic auth", () => {

@@ -178,6 +178,14 @@ function buildActivityMessages({
   ];
 }
 
+function normalizeTrackQuery(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLocaleLowerCase("en-US")
+    .replace(/[^\p{L}\p{N}]+/gu, " ")
+    .trim();
+}
+
 function trimContext(value, maxChars = 4000) {
   const text = String(value || "").trim();
   return text.length <= maxChars ? text : text.slice(0, maxChars) + "\n（后文已截短）";
@@ -561,7 +569,9 @@ async function runActivityCycle(options) {
     const searchResult = await client.callTool("spotify_search", { query: decision.query, type: "track", limit: 5 });
     const trackUri = extractTrackUri(searchResult);
     if (!trackUri) throw new Error("Spotify 搜索结果中没有可用的 track URI");
-    if ((options.recentTrackUris || []).includes(trackUri)) {
+    const normalizedQuery = normalizeTrackQuery(decision.query);
+    const duplicateQuery = (options.recentTrackQueries || []).some(query => normalizeTrackQuery(query) === normalizedQuery);
+    if ((options.recentTrackUris || []).includes(trackUri) || duplicateQuery) {
       return { ran: true, status: "skipped", decision, trackUri, reason: "recent_duplicate", source: "spotify" };
     }
     await client.callTool("spotify_playlist", {
@@ -636,7 +646,7 @@ async function runActivityCycle(options) {
       status: "success",
       decision,
       source: "ombre",
-      timelineSummary: `在 Ombre 写了一封信「${letterArgs.title}」：${decision.content.slice(0, 500)}`
+      timelineSummary: `在 Ombre 写了一封信「${letterArgs.title}」：${decision.content.slice(0, 1200)}`
     };
   } catch (error) {
     error.activityDecision = decision;
@@ -663,6 +673,7 @@ module.exports = {
   loadGamesContext,
   loadForumContext,
   loadOmbreContext,
+  normalizeTrackQuery,
   parseActivityDecision,
   parseGameStepDecision,
   parseEnabledActions,

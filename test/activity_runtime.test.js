@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   activityGate,
   classifyActivityFailure,
+  normalizeTrackQuery,
   parseActivityDecision,
   parseGameStepDecision,
   requestActivityDecision,
@@ -72,6 +73,11 @@ test("parses safe Ombre activity decisions", () => {
     aspect: "becoming",
     reason: "反复出现"
   });
+});
+
+test("normalizes equivalent Spotify search wording for duplicate checks", () => {
+  assert.equal(normalizeTrackQuery("  Like Real People Do - HOZIER "), "like real people do hozier");
+  assert.equal(normalizeTrackQuery("Like Real People Do／Hozier"), "like real people do hozier");
 });
 
 test("parses a forum activity decision", () => {
