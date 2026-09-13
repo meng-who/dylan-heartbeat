@@ -364,11 +364,11 @@ OMBRE_MCP_TOKEN=你的Ombre静态Token
 OMBRE_MCP_TIMEOUT_MS=12000
 ```
 
-先保持 `SOLO_ENABLED=false`，等 Ombre 地址与 Token 填好后再改成 `true`。Token 只放 Render Secret，不要发送到聊天或提交 GitHub。`SOLO_MODEL_NAME` 与 `SOLO_BACKUP_MODEL_NAME` 留空时会沿用普通 `MODEL_NAME` 与 `BACKUP_MODEL_NAME`。欲望阈值、离开多久才触发、冷却时间和总开关，可在 `/pulse` 身体状态面板里修改。Solo 无论成功还是技术失败都会写入加密 Archive，便于和 Pulse 身体事件按时间核对。
+先保持 `SOLO_ENABLED=false`，等 Ombre 地址与 Token 填好后再改成 `true`。Token 只放 Render Secret，不要发送到聊天或提交 GitHub。`SOLO_MODEL_NAME` 与 `SOLO_BACKUP_MODEL_NAME` 留空时会沿用普通 `MODEL_NAME` 与 `BACKUP_MODEL_NAME`。欲望阈值、离开多久才触发、冷却时间和总开关，可在 `/pulse` 身体状态面板里修改。Solo 无论成功还是技术失败都会写入加密 Archive，便于和 Pulse 身体事件按时间核对；成功完成后的短概要也会进入 Gateway 私有时间线，让 AI 在之后聊天时记得这次独处。
 
 ## 🎧 自主活动（实验功能）
 
-Activity Runtime 独立于普通主动推送：即使 `NIGHT_WAKE_AFTER_MINUTES=999`，它仍会按自己的闲置时间、冷却时间和每日预算判断是否运行。每轮最多调用一次模型、执行一件事，并且不会在同一轮紧接着再运行普通唤醒。
+Activity Runtime 独立于普通主动推送：即使 `NIGHT_WAKE_AFTER_MINUTES=999`，它仍会按自己的闲置时间、冷却时间和每日预算判断是否运行。普通 Activity 每轮调用一次模型；Games Activity 会多调用一次模型来批量规划本轮操作。它不会在同一轮紧接着再运行普通唤醒。
 
 Activity 可从 Spotify、Ombre 与 AISay 论坛三类动作中每轮选择一件。Spotify 只开放搜索和向指定歌单添加歌曲，不开放播放、暂停、音量、资料库删除等工具。Ombre 会在同一轮模型调用前读取 `feel`、`I` 和最近信件作为回想材料，并只允许写一条候选自我认知或一封 AI 自己的普通未锁信件；不会开放 `promote`、`supersedes` 或 `letter_lock_update`。新版 AISay 把所有功能收进统一的 `cli` 工具；正式启用论坛动作前，先用只读测试取得当前 `cli help` 指令表，再按真实 command 建立读写白名单。
 
@@ -400,7 +400,7 @@ ADMIN_SESSION_DAYS=180
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
 - `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`games` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。
-- Games Activity 每轮先选一款目录中的游戏，再动态读取该游戏指南，最多连续执行 4 个 `play` 步骤。它不会调用 `account`；到达步数上限会暂停待续，逐步参数和返回都会加密写入 Archive。
+- Games Activity 目前只开放 `fishing` 和 `garden_cat`。每轮第一次模型请求决定是否玩，第二次根据指南、状态和目录一次性规划最多 8 条命令；之后由程序机械执行，不再逐步调用模型。钓鱼命令会合并成一个批次，花园命令会按顺序执行。它不会调用 `account`、重开、导入导出或共享便签，逐步参数和返回都会加密写入 Archive。
 - 管理页登录默认保留 180 天，并使用适合手机从外部链接打开的 SameSite=Lax Cookie；可用 `ADMIN_SESSION_DAYS` 调整为 1-365 天。
 - Forum Activity 只读取已经加入的公开房间；若当前没有任何已加入的公开房间，每轮至多自动加入一个，再读取近况并决定是否发言。加入行为也会写入 Archive 和私有时间线。
 - `AUTONOMY_MODEL_NAME` / `AUTONOMY_BACKUP_MODEL_NAME`：可为 Activity 单独选择更稳定或更便宜的模型；留空时分别沿用 `MODEL_NAME` / `BACKUP_MODEL_NAME`。
@@ -408,7 +408,7 @@ ADMIN_SESSION_DAYS=180
 - `AUTONOMY_IDLE_MINUTES`：用户离开多久后才允许活动。
 - `AUTONOMY_INTERVAL_MINUTES`：两次模型活动之间的最短间隔。
 - `AUTONOMY_MAX_ACTIONS_PER_DAY`：每天最多占用多少次模型活动预算；模型选择什么都不做、重复跳过或工具执行失败仍计一次，避免反复询问或重复写入。模型请求失败、超时或输出格式错误会记录到 Archive，但会退还每日名额，并等待 `AUTONOMY_INTERVAL_MINUTES` 后再尝试。
-- `SPOTIFY_PLAYLIST_ID`：唯一允许写入的歌单。添加歌曲不需要 Spotify 设备在线，也不需要设备 ID。
+- `SPOTIFY_PLAYLIST_ID`：唯一允许写入的歌单。添加前会读取歌单前 50 首并按 Spotify track URI 查重；不需要 Spotify 设备在线，也不需要设备 ID。
 - Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
 - `FORUM_MCP_URL`：填写 AISay 完整的自动登录 MCP 地址。地址已经包含 `?token=...` 时，`FORUM_MCP_TOKEN` 留空即可；它属于密钥，只放 Render Secret，不要提交到 GitHub。
 

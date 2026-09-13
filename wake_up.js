@@ -951,10 +951,31 @@ async function runSoloCheck() {
     systemPrompt,
     getLatestUserAt: getLatestUserAtMs,
     sendPush: sendPushNotification,
-    archiveSolo: record => appendWakeArchive({
-      local_time: getLocalTimeString(),
-      ...record
-    }),
+    archiveSolo: async record => {
+      const localTime = getLocalTimeString();
+      const archived = appendWakeArchive({ local_time: localTime, ...record });
+      if (record.status !== "failed") {
+        const details = [
+          record.summary,
+          record.notify_wanted && record.final_body ? `选择告诉用户：${record.final_body}` : ""
+        ].filter(Boolean).join("；").slice(0, 1000);
+        try {
+          const eventResponse = await fetch(GATEWAY_URL, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Gateway-API-Key": process.env.GATEWAY_API_KEY || ""
+            },
+            body: JSON.stringify({ content: `（${localTime} Solo 独处：${details || "完成了一次独处整理"}）` })
+          });
+          if (!eventResponse.ok) throw new Error(`Gateway 返回 HTTP ${eventResponse.status}`);
+          console.log(JSON.stringify({ event: "solo_timeline_recorded", mode: record.mode || "" }));
+        } catch (error) {
+          console.error(JSON.stringify({ event: "solo_timeline_failed", error: error.message || String(error) }));
+        }
+      }
+      return archived;
+    },
     logger: console
   });
   console.log(JSON.stringify({

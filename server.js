@@ -504,12 +504,16 @@ function stripPosition(messages) {
 function selectAutomationEvents(events) {
   const maxEvents = readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10);
   const maxActivityEvents = readPositiveIntegerEnv("MAX_INJECTED_ACTIVITY_EVENTS", 8);
+  const maxSoloEvents = readPositiveIntegerEnv("MAX_INJECTED_SOLO_EVENTS", 4);
   const indexedEvents = events.map((event, index) => ({ event, index }));
   const recentEvents = indexedEvents.slice(-maxEvents);
   const recentActivityEvents = indexedEvents
     .filter(({ event }) => normalizeContentToText(event.content).includes("自主活动："))
     .slice(-maxActivityEvents);
-  const selectedIndexes = new Set([...recentEvents, ...recentActivityEvents].map(({ index }) => index));
+  const recentSoloEvents = indexedEvents
+    .filter(({ event }) => normalizeContentToText(event.content).includes("Solo 独处："))
+    .slice(-maxSoloEvents);
+  const selectedIndexes = new Set([...recentEvents, ...recentActivityEvents, ...recentSoloEvents].map(({ index }) => index));
   const selectedEvents = indexedEvents
     .filter(({ index }) => selectedIndexes.has(index))
     .map(({ event }) => event);
@@ -526,7 +530,7 @@ function addAutomationEventContext(messages, events) {
   const note = [
     "[Dylan 自动化内部记录]",
     "以下内容由自动化程序生成，不是用户发送或展示给你的消息。",
-    "它用于帮助你记住自己此前是否尝试推送，以及成功完成过哪些自主活动；不要把它归因于用户。",
+    "它用于帮助你记住自己此前是否尝试推送、Solo 独处的概要，以及成功完成过哪些自主活动；不要把它归因于用户。",
     eventLog,
     "[/Dylan 自动化内部记录]"
   ].join("\n");

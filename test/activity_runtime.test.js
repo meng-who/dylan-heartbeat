@@ -4,9 +4,10 @@ const test = require("node:test");
 const {
   activityGate,
   classifyActivityFailure,
+  extractTrackUris,
   normalizeTrackQuery,
   parseActivityDecision,
-  parseGameStepDecision,
+  parseGamePlan,
   requestActivityDecision,
   runActivityCycle,
   shouldChargeActivityBudget
@@ -80,6 +81,12 @@ test("normalizes equivalent Spotify search wording for duplicate checks", () => 
   assert.equal(normalizeTrackQuery("Like Real People Do／Hozier"), "like real people do hozier");
 });
 
+test("extracts every Spotify track URI from playlist item responses", () => {
+  assert.deepEqual(extractTrackUris({
+    content: [{ type: "text", text: '{"items":[{"uri":"spotify:track:ABC123"},{"track":{"uri":"spotify:track:XYZ789"}}]}' }]
+  }), ["spotify:track:ABC123", "spotify:track:XYZ789"]);
+});
+
 test("parses a forum activity decision", () => {
   assert.deepEqual(parseActivityDecision([
     "<activity>",
@@ -101,15 +108,13 @@ test("parses a forum activity decision", () => {
   });
 });
 
-test("parses a games activity choice and a bounded game step", () => {
+test("parses a games activity choice and a bounded batch plan", () => {
   assert.equal(parseActivityDecision(
-    "<activity><action>games_play</action><game>forest</game><reason>想走进一段故事</reason></activity>"
-  ).game, "forest");
-  assert.deepEqual(parseGameStepDecision('{"done":false,"action":"start","params":{"line":"red"},"summary":"开始一条角色线"}'), {
-    done: false,
-    action: "start",
-    params: { line: "red" },
-    summary: "开始一条角色线"
+    "<activity><action>games_play</action><game>fishing</game><reason>想去钓鱼</reason></activity>"
+  ).game, "fishing");
+  assert.deepEqual(parseGamePlan('{"commands":["buy basic_worm 10","cast 10 stop=new"],"summary":"补饵后钓一轮"}'), {
+    commands: ["buy basic_worm 10", "cast 10 stop=new"],
+    summary: "补饵后钓一轮"
   });
 });
 
@@ -178,11 +183,14 @@ test("searches and adds one track without exposing playback tools", async () => 
     if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
     if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
       { name: "spotify_search", inputSchema: { type: "object" } },
-      { name: "spotify_playlist", inputSchema: { properties: { action: { enum: ["list", "add_items"] } } } },
+      { name: "spotify_playlist", inputSchema: { properties: { action: { enum: ["list", "create", "items", "add", "remove"] } } } },
       { name: "spotify_control", inputSchema: { type: "object" } }
     ] } });
     if (body.params?.name === "spotify_search") return reply({ jsonrpc: "2.0", id: body.id, result: {
       content: [{ type: "text", text: "Song by Artist — spotify:track:ABC123" }]
+    } });
+    if (body.params?.arguments?.action === "items") return reply({ jsonrpc: "2.0", id: body.id, result: {
+      content: [{ type: "text", text: '{"items":[{"uri":"spotify:track:OTHER"}]}' }]
     } });
     return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "added" }] } });
   };
@@ -204,9 +212,14 @@ test("searches and adds one track without exposing playback tools", async () => 
   assert.equal(result.status, "success");
   assert.equal(result.trackUri, "spotify:track:ABC123");
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
-  assert.deepEqual(toolCalls.map(call => call.name), ["spotify_search", "spotify_playlist"]);
+  assert.deepEqual(toolCalls.map(call => call.name), ["spotify_search", "spotify_playlist", "spotify_playlist"]);
   assert.deepEqual(toolCalls[1].arguments, {
-    action: "add_items",
+    action: "items",
+    playlist_id: "playlist-1",
+    limit: 50
+  });
+  assert.deepEqual(toolCalls[2].arguments, {
+    action: "add",
     playlist_id: "playlist-1",
     uris: ["spotify:track:ABC123"]
   });
@@ -433,7 +446,7 @@ test("a temporary forum outage does not block other enabled activities", async (
   assert.match(warnings[0], /forum_activity_context_unavailable/);
 });
 
-test("plays a multi-step game session without exposing account management", async () => {
+test("plans and executes a fishing batch with only two model calls", async () => {
   const calls = [];
   let modelCall = 0;
   const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
@@ -442,9 +455,8 @@ test("plays a multi-step game session without exposing account management", asyn
     calls.push({ url, body });
     if (url === "https://model.test/v1/chat/completions") {
       const outputs = [
-        "<activity><action>games_play</action><game>forest</game><reason>想走进一段故事</reason></activity>",
-        '{"done":false,"action":"start","params":{"line":"red"},"summary":"开始红线"}',
-        '{"done":true,"summary":"在岔路口先停一会儿"}'
+        "<activity><action>games_play</action><game>fishing</game><reason>想安静钓一会儿</reason></activity>",
+        '{"commands":["buy basic_worm 10","cast 10 stop=new","sell all"],"summary":"补充鱼饵，钓到新鱼后收竿"}'
       ];
       return reply({ choices: [{ message: { content: outputs[modelCall++] } }] });
     }
@@ -455,9 +467,9 @@ test("plays a multi-step game session without exposing account management", asyn
     ] } });
     const name = body.params?.name;
     const texts = {
-      list_games: "小游戏: forest·格林童话境遇·作者 | arcade·文字街机厅·作者",
-      get_guide: "forest 支持 start、observe、choose、status。先 start。",
-      play: '{"ok":true,"scene":"你来到林中岔路口"}'
+      list_games: "小游戏: fishing·钓鱼模拟·作者 | garden_cat·花园与猫咪·作者 | forest·格林童话境遇·作者",
+      get_guide: "fishing 使用 cmd；支持 buy、cast 和 sell。",
+      play: '{"ok":true,"coins":20,"bait":2}'
     };
     return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: texts[name] || "ok" }] } });
   };
@@ -472,10 +484,63 @@ test("plays a multi-step game session without exposing account management", asyn
 
   assert.equal(result.status, "success");
   assert.equal(result.source, "games");
-  assert.equal(result.gameName, "forest");
+  assert.equal(result.gameName, "fishing");
   assert.equal(result.gameSteps.length, 1);
-  assert.equal(result.gameOutcome, "在岔路口先停一会儿");
+  assert.equal(result.gameOutcome, "补充鱼饵，钓到新鱼后收竿");
+  assert.equal(modelCall, 2);
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
-  assert.deepEqual(toolCalls.map(call => call.name), ["list_games", "get_guide", "play"]);
+  assert.deepEqual(toolCalls.map(call => call.name), ["list_games", "get_guide", "play", "play"]);
+  assert.deepEqual(toolCalls.at(-1).arguments, {
+    game: "fishing",
+    action: "cmd",
+    params: { command: "buy basic_worm 10; cast 10 stop=new; sell all" }
+  });
+  assert.equal(toolCalls.some(call => call.name === "account"), false);
+});
+
+test("plans garden care once and executes its commands without more model calls", async () => {
+  const calls = [];
+  let modelCall = 0;
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      const outputs = [
+        "<activity><action>games_play</action><game>garden_cat</game><reason>想照料花和猫</reason></activity>",
+        '{"commands":["harvest all","sell all","feed basic","give_water","pet"],"summary":"收花并照顾猫咪"}'
+      ];
+      return reply({ choices: [{ message: { content: outputs[modelCall++] } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "list_games" }, { name: "get_guide" }, { name: "play" }, { name: "account" }
+    ] } });
+    const name = body.params?.name;
+    let text = "ok";
+    if (name === "list_games") text = "小游戏: fishing·钓鱼模拟·作者 | garden_cat·花园与猫咪·作者";
+    if (name === "get_guide") text = "使用 status、catalog 和 cmd 照料花园。";
+    if (name === "play" && body.params.arguments.action === "status") text = '{"cat":{"hunger":30},"flowers":["mature"]}';
+    if (name === "play" && body.params.arguments.action === "catalog") text = '{"items":{"basic_food":{"price":5}}}';
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text }] } });
+  };
+
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    enabledActions: "games",
+    gamesUrl: "https://games.test/mcp?token=secret",
+    fetchImpl
+  });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.gameName, "garden_cat");
+  assert.equal(result.gameSteps.length, 5);
+  assert.equal(modelCall, 2);
+  const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
+  assert.deepEqual(toolCalls.slice(-5).map(call => call.arguments.params.command), [
+    "harvest all", "sell all", "feed basic", "give_water", "pet"
+  ]);
   assert.equal(toolCalls.some(call => call.name === "account"), false);
 });

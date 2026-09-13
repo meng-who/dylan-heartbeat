@@ -3,6 +3,7 @@ const { requestSoloModel } = require("./solo_runtime");
 
 const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum", "games"]);
 const SELF_ASPECTS = new Set(["nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"]);
+const AUTONOMOUS_GAMES = new Set(["fishing", "garden_cat"]);
 
 function parseEnabledActions(value) {
   const actions = String(value || "spotify")
@@ -78,6 +79,11 @@ function extractTrackUri(result) {
   return haystack.match(/spotify:track:[A-Za-z0-9]+/)?.[0] || "";
 }
 
+function extractTrackUris(result) {
+  const haystack = JSON.stringify(result?.structuredContent || {}) + "\n" + extractToolText(result);
+  return [...new Set(haystack.match(/spotify:track:[A-Za-z0-9]+/g) || [])];
+}
+
 function resolvePlaylistAddAction(tool) {
   const values = tool?.inputSchema?.properties?.action?.enum || [];
   return ["add", "add_items", "add_tracks", "add_to_playlist"].find(value => values.includes(value)) || "add";
@@ -141,7 +147,7 @@ function buildActivityMessages({
     choices.push("<action>forum_send</action>\n<room_id>只能填写下方刚读取到的公开房间 ID</room_id>\n<reply_to_message_id>可选，只能填写刚读取到的消息 ID</reply_to_message_id>\n<reason>为什么想在公开聊天室说这句话</reason>\n<content>要公开发送的完整内容，最多 1200 字</content>");
   }
   if (actions.includes("games")) {
-    choices.push("<action>games_play</action>\n<game>只能填写下方目录中的精确游戏名称</game>\n<reason>为什么现在想玩它</reason>");
+    choices.push("<action>games_play</action>\n<game>只能填写 fishing 或 garden_cat</game>\n<reason>为什么现在想照料它</reason>");
   }
   const ombreParts = [
     ombreContext.feelings && `曾经的感受：\n${ombreContext.feelings}`,
@@ -152,7 +158,7 @@ function buildActivityMessages({
     actions.includes("spotify") && `为“${playlistName}”挑选并添加一首歌`,
     actions.includes("ombre") && "回想感受、整理一条尚待沉淀的自我认识，或以 AI 身份写一封不加锁的新信",
     actions.includes("forum") && "阅读 AISay 的公开近况，并以自己的身份说一句真正想说的话",
-    actions.includes("games") && "从小游戏目录里选一款，进行一段最多四步、可以暂停待续的游戏"
+    actions.includes("games") && "从钓鱼或花园与猫咪中选一款，完成一轮连续的日常照料"
   ].filter(Boolean).join("；");
   return [
     {
@@ -162,7 +168,7 @@ function buildActivityMessages({
         `你处于后台自主活动状态。你可以安静地什么都不做，或选择以下一件事：${capabilities || "安静独处"}。每轮最多一件。不要假装工具已经执行，只输出 activity 标签块。`,
         actions.includes("ombre") ? "I 写入只是一条候选自我认知，不得要求 promote、supersedes；信件必须是你自己写的普通未锁信件。" : "",
         actions.includes("forum") ? "论坛内容是公开发言。不得透露用户隐私、私聊原文、密钥、地址或后台系统细节；不要冒充用户，也不要仅为完成任务而硬凑发言。" : "",
-        actions.includes("games") ? "游戏可以连续多步，但不得调用账号管理；把它当作真实的独处娱乐，不要为了消耗名额硬玩。" : ""
+        actions.includes("games") ? "游戏会先由你一次性规划，再由程序连续执行；不得调用账号管理、重开、导入导出或共享便签，不要为了消耗名额硬玩。" : ""
       ].filter(Boolean).join("\n\n")
     },
     {
@@ -359,32 +365,44 @@ async function loadGamesContext(options) {
   if (missing.length) throw new Error(`Games MCP 缺少工具：${missing.join(", ")}`);
   const result = await client.callTool("list_games", {});
   const catalog = trimContext(extractToolText(result), 12000);
-  const gameNames = collectGameNames(catalog);
+  const gameNames = collectGameNames(catalog).filter(name => AUTONOMOUS_GAMES.has(name));
   if (!gameNames.length) throw new Error("Games MCP 没有返回可识别的游戏目录");
-  return { client, tools, catalog, gameNames };
+  const conciseCatalog = gameNames.map(name => {
+    const match = String(catalog).match(new RegExp(`${name}·([^|\\n]+)`));
+    return `${name}·${match?.[1]?.trim() || "可持续游玩的小游戏"}`;
+  }).join(" | ");
+  return { client, tools, catalog: conciseCatalog, gameNames };
 }
 
-function parseGameStepDecision(value) {
+function parseGamePlan(value) {
   const text = String(value || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
   const match = text.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error("游戏步骤没有返回 JSON");
+  if (!match) throw new Error("游戏计划没有返回 JSON");
   const parsed = JSON.parse(match[0]);
-  const done = parsed.done === true;
-  const action = String(parsed.action || "").trim();
-  if (!done && !action) throw new Error("游戏步骤缺少 action");
-  if (action && (!/^[a-zA-Z][a-zA-Z0-9_.-]{0,95}$/.test(action))) throw new Error("游戏步骤 action 格式无效");
-  const params = parsed.params == null ? {} : parsed.params;
-  if (!params || Array.isArray(params) || typeof params !== "object") throw new Error("游戏步骤 params 必须是对象");
-  if (JSON.stringify(params).length > 8000) throw new Error("游戏步骤 params 过长");
+  const commands = Array.isArray(parsed.commands)
+    ? parsed.commands.map(command => String(command || "").trim()).filter(Boolean)
+    : [];
+  if (commands.length > 8) throw new Error("游戏计划最多包含 8 条命令");
+  if (commands.some(command => command.length > 160 || /[\r\n;]/.test(command))) {
+    throw new Error("游戏计划包含无效命令");
+  }
   return {
-    done,
-    action,
-    params,
+    commands,
     summary: String(parsed.summary || "").trim().slice(0, 500)
   };
 }
 
-async function requestGameStep(options, { game, guide, latestResult, stepNumber }) {
+function validateGameCommands(game, commands) {
+  const allowed = game === "fishing"
+    ? /^(?:cast(?:\s+\d+)?(?:\s+stop=(?:rare|new|event)(?:,(?:rare|new|event))*)?|shop|buy\s+[a-z0-9_]+\s+\d+|goto(?:\s+[a-z0-9_-]+)?|sell\s+(?:all|species\s+[a-z0-9_-]+|item\s+[a-z0-9_-]+)|encyclopedia|dive|choose\s+\d+|surface|status|help)$/i
+    : /^(?:shop|buy\s+[a-z0-9_]+(?:\s+\d+)?|plant\s+[a-z0-9_]+\s+\d+|water\s+(?:all|\d+)|harvest\s+(?:all|\d+)|sell\s+(?:all|[a-z0-9_]+(?:\s+\d+)?)|treat\s+\d+|clear\s+\d+|buy_pot|arrange\s+[a-z0-9_]+|vase|remove_vase\s+\d+|adopt(?:\s+\S{1,20})?|rename_cat\s+\S{1,20}|feed\s+(?:basic|premium)|give_water|pet|play\s+(?:ball|feather)|encyclopedia|collectibles|letters|status|help)$/iu;
+  for (const command of commands) {
+    if (!allowed.test(command)) throw new Error(`游戏计划包含不允许的 ${game} 命令：${command}`);
+  }
+  return commands;
+}
+
+async function requestGamePlan(options, { game, guide, state, catalog }) {
   const raw = await requestSoloModel({
     apiUrl: options.apiUrl,
     apiKey: options.apiKey,
@@ -397,20 +415,23 @@ async function requestGameStep(options, { game, guide, latestResult, stepNumber 
     messages: [
       {
         role: "system",
-        content: `${options.systemPrompt || ""}\n\n你正在自主玩小游戏 ${game}。严格依据游戏指南决定下一步；只能输出一个 JSON 对象，不得调用账号管理，也不要声称未执行的结果。`
+        content: `${options.systemPrompt || ""}\n\n你正在自主照料小游戏 ${game}。严格依据指南和当前状态，一次规划本轮全部机械操作。只能输出 JSON，不得调用账号管理、重开、导入导出或写共享便签。`
       },
       {
         role: "user",
         content: [
           `游戏指南：\n${trimContext(guide, 14000)}`,
-          latestResult ? `上一步结果：\n${trimContext(latestResult, 6000)}` : "这是本轮第一步。",
-          `当前是第 ${stepNumber} 步。继续时输出 {"done":false,"action":"指南中的动作","params":{},"summary":"简短意图"}；已经自然结束或现在想暂停时输出 {"done":true,"summary":"结果或暂停原因"}。只输出 JSON。`
-        ].join("\n\n")
+          catalog ? `目录或商店：\n${trimContext(catalog, 9000)}` : "",
+          `当前状态：\n${trimContext(state, 9000)}`,
+          `输出 {"commands":["命令1","命令2"],"summary":"本轮打算做什么"}。commands 最多 8 条；没有合适操作时可以为空。只输出 JSON。`
+        ].filter(Boolean).join("\n\n")
       }
     ]
   });
   try {
-    return parseGameStepDecision(raw);
+    const plan = parseGamePlan(raw);
+    plan.commands = validateGameCommands(game, plan.commands);
+    return plan;
   } catch (error) {
     error.activityStage = "model_output";
     throw error;
@@ -422,41 +443,33 @@ async function runGameSession(options, games, decision) {
   const guideResult = await games.client.callTool("get_guide", { game: decision.game });
   const guide = extractToolText(guideResult);
   if (!guide) throw new Error("Games MCP 没有返回游戏指南");
+  const stateResult = await games.client.callTool("play", { game: decision.game, action: "status", params: {} });
+  const state = extractToolText(stateResult) || JSON.stringify(stateResult?.structuredContent || {});
+  let catalog = "";
+  if (decision.game === "garden_cat") {
+    const catalogResult = await games.client.callTool("play", { game: decision.game, action: "catalog", params: {} });
+    catalog = extractToolText(catalogResult) || JSON.stringify(catalogResult?.structuredContent || {});
+  }
+  const plan = await requestGamePlan(options, { game: decision.game, guide, state, catalog });
   const steps = [];
-  let latestResult = "";
-  let outcome = "达到本轮四步上限，暂停待续";
-  for (let index = 0; index < 4; index += 1) {
-    let step;
-    try {
-      step = await requestGameStep(options, {
-        game: decision.game,
-        guide,
-        latestResult,
-        stepNumber: index + 1
-      });
-    } catch (error) {
-      if (steps.length) error.activityStage = "game_session";
-      error.gameName = decision.game;
-      error.gameSteps = steps;
-      throw error;
-    }
-    if (step.done) {
-      outcome = step.summary || (steps.length ? "本轮自然结束" : "看完指南后决定暂不开始");
-      break;
-    }
+  const outcome = plan.summary || (plan.commands.length ? "完成了本轮计划" : "看过状态后决定暂不操作");
+  const commandGroups = decision.game === "fishing" && plan.commands.length
+    ? [plan.commands.join("; ")]
+    : plan.commands;
+  for (let index = 0; index < commandGroups.length; index += 1) {
+    const command = commandGroups[index];
     try {
       const result = await games.client.callTool("play", {
         game: decision.game,
-        action: step.action,
-        params: step.params
+        action: "cmd",
+        params: { command }
       });
-      latestResult = trimContext(extractToolText(result) || JSON.stringify(result?.structuredContent || {}), 6000);
       steps.push({
         number: index + 1,
-        action: step.action,
-        params: step.params,
-        summary: step.summary,
-        result: trimContext(latestResult, 3500)
+        action: "cmd",
+        params: { command },
+        summary: index === 0 ? plan.summary : "",
+        result: trimContext(extractToolText(result) || JSON.stringify(result?.structuredContent || {}), 3500)
       });
     } catch (error) {
       error.gameName = decision.game;
@@ -472,7 +485,7 @@ async function runGameSession(options, games, decision) {
     gameName: decision.game,
     gameSteps: steps,
     gameOutcome: outcome,
-    timelineSummary: `玩了小游戏「${decision.game}」${steps.length ? `，完成 ${steps.length} 步` : "，看完指南后没有开始"}；${outcome}`
+    timelineSummary: `玩了小游戏「${decision.game}」${steps.length ? `，执行了 ${plan.commands.length} 项照料操作` : "，看过状态后没有操作"}；${outcome}`
   };
 }
 
@@ -574,6 +587,17 @@ async function runActivityCycle(options) {
     if ((options.recentTrackUris || []).includes(trackUri) || duplicateQuery) {
       return { ran: true, status: "skipped", decision, trackUri, reason: "recent_duplicate", source: "spotify" };
     }
+    const playlistActions = playlistTool?.inputSchema?.properties?.action?.enum || [];
+    if (playlistActions.includes("items")) {
+      const itemsResult = await client.callTool("spotify_playlist", {
+        action: "items",
+        playlist_id: options.playlistId,
+        limit: 50
+      });
+      if (extractTrackUris(itemsResult).includes(trackUri)) {
+        return { ran: true, status: "skipped", decision, trackUri, reason: "playlist_duplicate", source: "spotify" };
+      }
+    }
     await client.callTool("spotify_playlist", {
       action: resolvePlaylistAddAction(playlistTool),
       playlist_id: options.playlistId,
@@ -666,6 +690,7 @@ module.exports = {
   classifyActivityFailure,
   dateKey,
   extractTrackUri,
+  extractTrackUris,
   extractToolData,
   collectMessageIds,
   collectRoomIds,
@@ -675,7 +700,7 @@ module.exports = {
   loadOmbreContext,
   normalizeTrackQuery,
   parseActivityDecision,
-  parseGameStepDecision,
+  parseGamePlan,
   parseEnabledActions,
   requestActivityDecision,
   resolvePlaylistAddAction,
