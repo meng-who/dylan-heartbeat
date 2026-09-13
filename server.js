@@ -1593,8 +1593,15 @@ app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, rep
   }
   try {
     const requestedGame = String(req.query?.game || "").trim();
+    const inspection = String(req.query?.inspect || "").trim();
     if (requestedGame && !/^[a-z][a-z0-9_]{0,95}$/.test(requestedGame)) {
       return reply.code(400).send({ ok: false, error: "game 格式无效" });
+    }
+    if (inspection && inspection !== "help") {
+      return reply.code(400).send({ ok: false, error: "inspect 只支持 help" });
+    }
+    if (inspection && !requestedGame) {
+      return reply.code(400).send({ ok: false, error: "inspect=help 时必须提供 game" });
     }
     const client = new RemoteMcpClient({
       url: process.env.GAMES_MCP_URL,
@@ -1610,6 +1617,7 @@ app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, rep
       .map(tool => [tool.name, tool.inputSchema || {}]));
     let games = "";
     let guide = "";
+    let inspectionResult = "";
     if (!missing.length) {
       const result = await client.callTool("list_games", {});
       games = (result?.content || [])
@@ -1633,6 +1641,19 @@ app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, rep
           .join("\n")
           .trim()
           .slice(0, 30000);
+        if (inspection === "help") {
+          const helpResult = await client.callTool("play", {
+            game: requestedGame,
+            action: "help",
+            params: {}
+          });
+          inspectionResult = (helpResult?.content || [])
+            .filter(item => item?.type === "text")
+            .map(item => String(item.text || ""))
+            .join("\n")
+            .trim()
+            .slice(0, 30000);
+        }
       }
     }
     return reply.code(missing.length ? 502 : 200).send({
@@ -1643,7 +1664,9 @@ app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, rep
       schemas,
       games,
       guide_game: requestedGame || "",
-      guide
+      guide,
+      inspection: inspection || "",
+      inspection_result: inspectionResult
     });
   } catch (error) {
     req.log.error({ event: "games_activity_mcp_test_failed", error: error.message });

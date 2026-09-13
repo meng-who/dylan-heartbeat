@@ -412,7 +412,7 @@ GAMES_MCP_TIMEOUT_MS=20000
 
 Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CHECK_INTERVAL_MINUTES` 或普通唤醒阈值影响。它与 Wake/Solo 恰好撞车时只会跳过这一次条件检查，稍后按自己的频率重试，避免同时调用两个模型。
 
-部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test`、`/admin/activity/forum-test` 和 `/admin/activity/games-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。论坛测试只调用无副作用的 `cli({command:"help"})` 并返回指令指南；可用 `/admin/activity/forum-test?path=chat` 继续查询领域或完整命令。游戏测试默认只调用 `list_games`；传入 `/admin/activity/games-test?game=fishing` 时还会只读调用该游戏的 `get_guide`，不会开局、游玩或修改账号。诊断入口都不调用模型。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
+部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test`、`/admin/activity/forum-test` 和 `/admin/activity/games-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。论坛测试只调用无副作用的 `cli({command:"help"})` 并返回指令指南；可用 `/admin/activity/forum-test?path=chat` 继续查询领域或完整命令。游戏测试默认只调用 `list_games`；传入 `/admin/activity/games-test?game=fishing` 时还会只读调用该游戏的 `get_guide`；再加 `&inspect=help` 会固定调用只读的 `play(game, action="help", params={})`。这些入口不会开局、游玩、修改账号或调用模型。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
 
 ## 🌦️ 天气注入
 
