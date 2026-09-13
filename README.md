@@ -385,6 +385,9 @@ AUTONOMY_IDLE_MINUTES=120
 AUTONOMY_INTERVAL_MINUTES=180
 AUTONOMY_MAX_ACTIONS_PER_DAY=3
 AUTONOMY_HISTORY_MESSAGES=30
+MAX_INJECTED_PUSH_EVENTS=3
+MAX_INJECTED_ACTIVITY_EVENTS=3
+MAX_INJECTED_SOLO_EVENTS=1
 SPOTIFY_MCP_URL=https://你的-spotify-mcp.example.com/mcp
 SPOTIFY_MCP_TOKEN=你的Bearer-Token
 SPOTIFY_MCP_TIMEOUT_MS=20000
@@ -408,6 +411,7 @@ ADMIN_SESSION_DAYS=180
 - `AUTONOMY_IDLE_MINUTES`：用户离开多久后才允许活动。
 - `AUTONOMY_INTERVAL_MINUTES`：两次模型活动之间的最短间隔。
 - `AUTONOMY_MAX_ACTIONS_PER_DAY`：每天最多占用多少次模型活动预算；模型选择什么都不做、重复跳过或工具执行失败仍计一次，避免反复询问或重复写入。模型请求失败、超时或输出格式错误会记录到 Archive，但会退还每日名额，并等待 `AUTONOMY_INTERVAL_MINUTES` 后再尝试。
+- `MAX_INJECTED_PUSH_EVENTS`、`MAX_INJECTED_ACTIVITY_EVENTS`、`MAX_INJECTED_SOLO_EVENTS`：分别控制聊天上下文中保留的最近推送、成功 Activity 和成功 Solo 概要数量。未设置新的推送变量时会继续读取旧的 `MAX_INJECTED_WAKE_EVENTS`；新部署可只保留 `MAX_INJECTED_PUSH_EVENTS`。
 - `SPOTIFY_PLAYLIST_ID`：唯一允许写入的歌单。添加前会读取歌单前 50 首并按 Spotify track URI 查重；不需要 Spotify 设备在线，也不需要设备 ID。
 - Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
 - `FORUM_MCP_URL`：填写 AISay 完整的自动登录 MCP 地址。地址已经包含 `?token=...` 时，`FORUM_MCP_TOKEN` 留空即可；它属于密钥，只放 Render Secret，不要提交到 GitHub。

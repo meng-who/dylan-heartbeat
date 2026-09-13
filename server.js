@@ -4,7 +4,7 @@ const Fastify = require("fastify");
 const fs = require("fs-extra");
 const path = require("path");
 const { dataPath, resolveDataPath, writeJsonAtomicSync } = require("./storage");
-const { isSpecialEventContent } = require("./special_events");
+const { classifySpecialEventContent, isSpecialEventContent } = require("./special_events");
 const { retainTimelineMessages } = require("./timeline_retention");
 const { decideRequestAccess } = require("./network_access");
 const { fetchPulseDashboard } = require("./pulse_dashboard_proxy");
@@ -297,7 +297,13 @@ function loadTimeline() {
 // ========================
 function saveTimeline(messages) {
   const maxTimelineMessages = readPositiveIntegerEnv("MAX_TIMELINE_MESSAGES", 50);
-  const maxSpecialEvents = Math.max(readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10), 20);
+  const maxPushEvents = readPositiveIntegerEnv(
+    "MAX_INJECTED_PUSH_EVENTS",
+    readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10)
+  );
+  const maxActivityEvents = readPositiveIntegerEnv("MAX_INJECTED_ACTIVITY_EVENTS", 8);
+  const maxSoloEvents = readPositiveIntegerEnv("MAX_INJECTED_SOLO_EVENTS", 4);
+  const maxSpecialEvents = Math.max(maxPushEvents + maxActivityEvents + maxSoloEvents, 20);
   const final = retainTimelineMessages(messages, {
     maxRealMessages: maxTimelineMessages,
     maxSpecialEvents,
@@ -502,18 +508,23 @@ function stripPosition(messages) {
 }
 
 function selectAutomationEvents(events) {
-  const maxEvents = readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10);
+  const maxPushEvents = readPositiveIntegerEnv(
+    "MAX_INJECTED_PUSH_EVENTS",
+    readPositiveIntegerEnv("MAX_INJECTED_WAKE_EVENTS", 10)
+  );
   const maxActivityEvents = readPositiveIntegerEnv("MAX_INJECTED_ACTIVITY_EVENTS", 8);
   const maxSoloEvents = readPositiveIntegerEnv("MAX_INJECTED_SOLO_EVENTS", 4);
   const indexedEvents = events.map((event, index) => ({ event, index }));
-  const recentEvents = indexedEvents.slice(-maxEvents);
+  const recentPushEvents = indexedEvents
+    .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "push")
+    .slice(-maxPushEvents);
   const recentActivityEvents = indexedEvents
-    .filter(({ event }) => normalizeContentToText(event.content).includes("自主活动："))
+    .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "activity")
     .slice(-maxActivityEvents);
   const recentSoloEvents = indexedEvents
-    .filter(({ event }) => normalizeContentToText(event.content).includes("Solo 独处："))
+    .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "solo")
     .slice(-maxSoloEvents);
-  const selectedIndexes = new Set([...recentEvents, ...recentActivityEvents, ...recentSoloEvents].map(({ index }) => index));
+  const selectedIndexes = new Set([...recentPushEvents, ...recentActivityEvents, ...recentSoloEvents].map(({ index }) => index));
   const selectedEvents = indexedEvents
     .filter(({ index }) => selectedIndexes.has(index))
     .map(({ event }) => event);
