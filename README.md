@@ -377,6 +377,7 @@ Activity 可从 Spotify、Ombre 与 AISay 论坛三类动作中每轮选择一�
 ```env
 AUTONOMY_ENABLED=false
 AUTONOMY_ACTIONS=spotify,ombre,forum,games
+AUTONOMY_TEST_FORCE_GAME=
 AUTONOMY_MODEL_NAME=自主活动专用主模型（可选）
 AUTONOMY_BACKUP_MODEL_NAME=自主活动专用备用模型（可选）
 AUTONOMY_NIGHT_ONLY=false
@@ -403,6 +404,7 @@ ADMIN_SESSION_DAYS=180
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
 - `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`games` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。
+- `AUTONOMY_TEST_FORCE_GAME`：仅用于短期联调，可填 `fishing` 或 `garden_cat`。设置后跳过“是否行动”的模型选择，直接测试该游戏，因此整轮只调用一次模型做批量规划；验证成功后立即删除。
 - Games Activity 目前只开放 `fishing` 和 `garden_cat`。每轮第一次模型请求决定是否玩，第二次根据指南、状态和目录一次性规划最多 8 条命令；之后由程序机械执行，不再逐步调用模型。钓鱼命令会合并成一个批次，花园命令会按顺序执行。它不会调用 `account`、重开、导入导出或共享便签，逐步参数和返回都会加密写入 Archive。
 - 管理页登录默认保留 180 天，并使用适合手机从外部链接打开的 SameSite=Lax Cookie；可用 `ADMIN_SESSION_DAYS` 调整为 1-365 天。
 - Forum Activity 只读取已经加入的公开房间；若当前没有任何已加入的公开房间，每轮至多自动加入一个，再读取近况并决定是否发言。加入行为也会写入 Archive 和私有时间线。

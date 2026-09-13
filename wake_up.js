@@ -1096,6 +1096,7 @@ async function runActivityCheck() {
       history,
       latestUserText: latestUserText ? normalizeContentToText(latestUserText.content) : "",
       enabledActions,
+      forceGame: process.env.AUTONOMY_TEST_FORCE_GAME,
       playlistName: process.env.SPOTIFY_PLAYLIST_NAME || "自主收藏",
       spotifyUrl: process.env.SPOTIFY_MCP_URL,
       spotifyToken: process.env.SPOTIFY_MCP_TOKEN,

@@ -498,7 +498,7 @@ test("plans and executes a fishing batch with only two model calls", async () =>
   assert.equal(toolCalls.some(call => call.name === "account"), false);
 });
 
-test("plans garden care once and executes its commands without more model calls", async () => {
+test("forced garden testing skips the activity choice and uses one model call", async () => {
   const calls = [];
   let modelCall = 0;
   const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
@@ -507,7 +507,6 @@ test("plans garden care once and executes its commands without more model calls"
     calls.push({ url, body });
     if (url === "https://model.test/v1/chat/completions") {
       const outputs = [
-        "<activity><action>games_play</action><game>garden_cat</game><reason>想照料花和猫</reason></activity>",
         '{"commands":["harvest all","sell all","feed basic","give_water","pet"],"summary":"收花并照顾猫咪"}'
       ];
       return reply({ choices: [{ message: { content: outputs[modelCall++] } }] });
@@ -530,6 +529,7 @@ test("plans garden care once and executes its commands without more model calls"
     apiUrl: "https://model.test/v1/chat/completions",
     model: "model",
     enabledActions: "games",
+    forceGame: "garden_cat",
     gamesUrl: "https://games.test/mcp?token=secret",
     fetchImpl
   });
@@ -537,7 +537,7 @@ test("plans garden care once and executes its commands without more model calls"
   assert.equal(result.status, "success");
   assert.equal(result.gameName, "garden_cat");
   assert.equal(result.gameSteps.length, 5);
-  assert.equal(modelCall, 2);
+  assert.equal(modelCall, 1);
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
   assert.deepEqual(toolCalls.slice(-5).map(call => call.arguments.params.command), [
     "harvest all", "sell all", "feed basic", "give_water", "pet"

@@ -511,6 +511,13 @@ async function requestActivityDecision(options, messages) {
 
 async function runActivityCycle(options) {
   const enabledActions = parseEnabledActions(options.enabledActions);
+  const forceGame = String(options.forceGame || "").trim().toLowerCase();
+  if (forceGame && !AUTONOMOUS_GAMES.has(forceGame)) {
+    throw new Error("AUTONOMY_TEST_FORCE_GAME 只能填写 fishing 或 garden_cat");
+  }
+  if (forceGame && !enabledActions.includes("games")) {
+    throw new Error("AUTONOMY_TEST_FORCE_GAME 需要同时启用 games");
+  }
   let availableActions = enabledActions;
   let ombre;
   if (enabledActions.includes("ombre")) ombre = await loadOmbreContext(options);
@@ -541,16 +548,26 @@ async function runActivityCycle(options) {
     }
   }
 
-  const decision = await requestActivityDecision(
-    options,
-    buildActivityMessages({
-      ...options,
-      enabledActions: availableActions,
-      ombreContext: ombre?.context,
-      forumContext: forum?.context,
-      gamesContext: games?.catalog
-    })
-  );
+  const decision = forceGame
+    ? {
+        action: "games_play",
+        game: forceGame,
+        query: "",
+        content: "",
+        title: "",
+        aspect: "",
+        reason: `临时测试 ${forceGame}`
+      }
+    : await requestActivityDecision(
+        options,
+        buildActivityMessages({
+          ...options,
+          enabledActions: availableActions,
+          ombreContext: ombre?.context,
+          forumContext: forum?.context,
+          gamesContext: games?.catalog
+        })
+      );
   if (decision.action === "none") {
     if (forum?.joinedRoomId) {
       return {
