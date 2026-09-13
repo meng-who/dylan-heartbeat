@@ -524,7 +524,7 @@ test("forced garden testing skips the activity choice and uses one model call", 
     calls.push({ url, body });
     if (url === "https://model.test/v1/chat/completions") {
       const outputs = [
-        '{"commands":["harvest all","sell all","feed basic","give_water","pet"],"summary":"收花并照顾猫咪"}'
+        '{"commands":["harvest all","sell all","feed premium_food","give_water","pet"],"summary":"收花并照顾猫咪"}'
       ];
       return reply({ choices: [{ message: { content: outputs[modelCall++] } }] });
     }
@@ -559,7 +559,7 @@ test("forced garden testing skips the activity choice and uses one model call", 
   assert.deepEqual(attemptedModels, ["model"]);
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
   assert.deepEqual(toolCalls.slice(-5).map(call => call.arguments.params.command), [
-    "harvest all", "sell all", "feed basic", "give_water", "pet"
+    "harvest all", "sell all", "feed premium", "give_water", "pet"
   ]);
   assert.equal(toolCalls.some(call => call.name === "account"), false);
 });

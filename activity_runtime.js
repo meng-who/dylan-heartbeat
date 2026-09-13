@@ -394,13 +394,16 @@ function parseGamePlan(value) {
 }
 
 function validateGameCommands(game, commands) {
+  const normalizedCommands = game === "garden_cat"
+    ? commands.map(command => command.replace(/^feed\s+(basic|premium)_food$/i, "feed $1"))
+    : commands;
   const allowed = game === "fishing"
     ? /^(?:cast(?:\s+\d+)?(?:\s+stop=(?:rare|new|event)(?:,(?:rare|new|event))*)?|shop|buy\s+[a-z0-9_]+\s+\d+|goto(?:\s+[a-z0-9_-]+)?|sell\s+(?:all|species\s+[a-z0-9_-]+|item\s+[a-z0-9_-]+)|encyclopedia|dive|choose\s+\d+|surface|status|help)$/i
     : /^(?:shop|buy\s+[a-z0-9_]+(?:\s+\d+)?|plant\s+[a-z0-9_]+\s+\d+|water\s+(?:all|\d+)|harvest\s+(?:all|\d+)|sell\s+(?:all|[a-z0-9_]+(?:\s+\d+)?)|treat\s+\d+|clear\s+\d+|buy_pot|arrange\s+[a-z0-9_]+|vase|remove_vase\s+\d+|adopt(?:\s+\S{1,20})?|rename_cat\s+\S{1,20}|feed\s+(?:basic|premium)|give_water|pet|play\s+(?:ball|feather)|encyclopedia|collectibles|letters|status|help)$/iu;
-  for (const command of commands) {
+  for (const command of normalizedCommands) {
     if (!allowed.test(command)) throw new Error(`游戏计划包含不允许的 ${game} 命令：${command}`);
   }
-  return commands;
+  return normalizedCommands;
 }
 
 async function requestGamePlan(options, { game, guide, state, catalog }) {
