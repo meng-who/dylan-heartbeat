@@ -101,6 +101,7 @@ function dateKey(date, timeZone) {
 function classifyActivityFailure(error) {
   const message = String(error?.message || error || "");
   if (error?.activityStage === "model_output") return "model_output";
+  if (error?.activityStage === "game_preflight") return "game_preflight";
   if (
     Array.isArray(error?.attemptedModels)
     || /Solo 模型请求失败|fetch failed|ECONN|socket|network|timeout|timed out|abort/i.test(message)
@@ -109,7 +110,7 @@ function classifyActivityFailure(error) {
 }
 
 function shouldChargeActivityBudget(result) {
-  return !(result?.status === "failed" && ["model_request", "model_output"].includes(result.failureKind));
+  return !(result?.status === "failed" && ["model_request", "model_output", "game_preflight"].includes(result.failureKind));
 }
 
 function activityGate({ now = new Date(), lastUserAt, state = {}, idleMinutes, intervalMinutes, maxPerDay, timeZone }) {
@@ -440,15 +441,36 @@ async function requestGamePlan(options, { game, guide, state, catalog }) {
 
 async function runGameSession(options, games, decision) {
   if (!games.gameNames.includes(decision.game)) throw new Error("Games Activity 拒绝目录之外的游戏名称");
-  const guideResult = await games.client.callTool("get_guide", { game: decision.game });
-  const guide = extractToolText(guideResult);
-  if (!guide) throw new Error("Games MCP 没有返回游戏指南");
-  const stateResult = await games.client.callTool("play", { game: decision.game, action: "status", params: {} });
-  const state = extractToolText(stateResult) || JSON.stringify(stateResult?.structuredContent || {});
+  let guide;
+  let state;
   let catalog = "";
-  if (decision.game === "garden_cat") {
-    const catalogResult = await games.client.callTool("play", { game: decision.game, action: "catalog", params: {} });
-    catalog = extractToolText(catalogResult) || JSON.stringify(catalogResult?.structuredContent || {});
+  try {
+    const guideResult = await games.client.callTool("get_guide", { game: decision.game });
+    guide = extractToolText(guideResult);
+    if (!guide) throw new Error("Games MCP 没有返回游戏指南");
+    const statusArguments = decision.game === "fishing"
+      ? { game: decision.game, action: "cmd", params: { command: "status" } }
+      : { game: decision.game, action: "status", params: {} };
+    let stateResult;
+    try {
+      stateResult = await games.client.callTool("play", statusArguments);
+    } catch (error) {
+      const message = String(error?.message || error || "");
+      const missingSave = /no[_ ]?(?:save|game)|not[_ ]?(?:found|started)|尚未|未(?:找到|创建|开始|开局)|请.*(?:new|开局)/i.test(message);
+      if (decision.game !== "fishing" || !missingSave) throw error;
+      await games.client.callTool("play", { game: decision.game, action: "new", params: {} });
+      stateResult = await games.client.callTool("play", statusArguments);
+    }
+    state = extractToolText(stateResult) || JSON.stringify(stateResult?.structuredContent || {});
+    if (decision.game === "garden_cat") {
+      const catalogResult = await games.client.callTool("play", { game: decision.game, action: "catalog", params: {} });
+      catalog = extractToolText(catalogResult) || JSON.stringify(catalogResult?.structuredContent || {});
+    }
+  } catch (error) {
+    error.activityStage = "game_preflight";
+    error.gameName = decision.game;
+    error.gameSteps = [];
+    throw error;
   }
   const plan = await requestGamePlan(options, { game: decision.game, guide, state, catalog });
   const steps = [];

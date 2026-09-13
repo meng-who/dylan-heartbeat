@@ -56,6 +56,11 @@ test("model-side failures do not consume the daily activity budget", () => {
   outputError.activityStage = "model_output";
   assert.equal(classifyActivityFailure(outputError), "model_output");
   assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "model_output" }), false);
+
+  const preflightError = new Error("Remote MCP tool play failed");
+  preflightError.activityStage = "game_preflight";
+  assert.equal(classifyActivityFailure(preflightError), "game_preflight");
+  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "game_preflight" }), false);
 });
 
 test("completed decisions and tool failures still consume a decision slot", () => {
@@ -490,6 +495,11 @@ test("plans and executes a fishing batch with only two model calls", async () =>
   assert.equal(modelCall, 2);
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
   assert.deepEqual(toolCalls.map(call => call.name), ["list_games", "get_guide", "play", "play"]);
+  assert.deepEqual(toolCalls[2].arguments, {
+    game: "fishing",
+    action: "cmd",
+    params: { command: "status" }
+  });
   assert.deepEqual(toolCalls.at(-1).arguments, {
     game: "fishing",
     action: "cmd",
