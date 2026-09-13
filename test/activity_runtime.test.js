@@ -153,6 +153,7 @@ test("parses a multiline tagged letter in one model request", async () => {
 
 test("records the attempted model chain when primary and backup channels fail", async () => {
   const requestedModels = [];
+  const attemptedModels = [];
   const fetchImpl = async (_url, init) => {
     const body = JSON.parse(init.body);
     requestedModels.push(body.model);
@@ -164,6 +165,7 @@ test("records the attempted model chain when primary and backup channels fail", 
       model: "primary",
       backupModel: "backup",
       enabledActions: "spotify",
+      onModelAttempt: ({ model }) => attemptedModels.push(model),
       fetchImpl
     }),
     error => {
@@ -173,6 +175,7 @@ test("records the attempted model chain when primary and backup channels fail", 
     }
   );
   assert.deepEqual(requestedModels, ["primary", "backup"]);
+  assert.deepEqual(attemptedModels, ["primary", "backup"]);
 });
 
 test("searches and adds one track without exposing playback tools", async () => {
@@ -454,6 +457,7 @@ test("a temporary forum outage does not block other enabled activities", async (
 test("plans and executes a fishing batch with only two model calls", async () => {
   const calls = [];
   let modelCall = 0;
+  const attemptedModels = [];
   const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
   const fetchImpl = async (url, init) => {
     const body = JSON.parse(init.body);
@@ -484,6 +488,7 @@ test("plans and executes a fishing batch with only two model calls", async () =>
     model: "model",
     enabledActions: "games",
     gamesUrl: "https://games.test/mcp?token=secret",
+    onModelAttempt: ({ model }) => attemptedModels.push(model),
     fetchImpl
   });
 
@@ -493,6 +498,7 @@ test("plans and executes a fishing batch with only two model calls", async () =>
   assert.equal(result.gameSteps.length, 1);
   assert.equal(result.gameOutcome, "补充鱼饵，钓到新鱼后收竿");
   assert.equal(modelCall, 2);
+  assert.deepEqual(attemptedModels, ["model", "model"]);
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
   assert.deepEqual(toolCalls.map(call => call.name), ["list_games", "get_guide", "play", "play"]);
   assert.deepEqual(toolCalls[2].arguments, {
@@ -511,6 +517,7 @@ test("plans and executes a fishing batch with only two model calls", async () =>
 test("forced garden testing skips the activity choice and uses one model call", async () => {
   const calls = [];
   let modelCall = 0;
+  const attemptedModels = [];
   const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
   const fetchImpl = async (url, init) => {
     const body = JSON.parse(init.body);
@@ -541,6 +548,7 @@ test("forced garden testing skips the activity choice and uses one model call", 
     enabledActions: "games",
     forceGame: "garden_cat",
     gamesUrl: "https://games.test/mcp?token=secret",
+    onModelAttempt: ({ model }) => attemptedModels.push(model),
     fetchImpl
   });
 
@@ -548,6 +556,7 @@ test("forced garden testing skips the activity choice and uses one model call", 
   assert.equal(result.gameName, "garden_cat");
   assert.equal(result.gameSteps.length, 5);
   assert.equal(modelCall, 1);
+  assert.deepEqual(attemptedModels, ["model"]);
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
   assert.deepEqual(toolCalls.slice(-5).map(call => call.arguments.params.command), [
     "harvest all", "sell all", "feed basic", "give_water", "pet"

@@ -1397,14 +1397,22 @@ function archivePageHtml() {
       if (item.game_name) details.push("游戏：" + item.game_name);
       if (item.game_outcome) details.push("结果：" + item.game_outcome);
       if (item.kind === "activity") {
+        if (Number.isFinite(Number(item.model_request_count))) {
+          const requestCount = Math.max(0, Number(item.model_request_count));
+          details.push(requestCount === 0
+            ? "模型请求：0 次（未请求模型）"
+            : "模型请求：" + requestCount + " 次（实际计费以模型供应商为准）");
+        } else {
+          details.push("模型请求：旧记录未统计");
+        }
         const hasSlotSnapshot = Number.isFinite(Number(item.daily_slots_used))
           && Number.isFinite(Number(item.daily_slots_limit))
           && Number.isFinite(Number(item.daily_slots_remaining));
         if (hasSlotSnapshot) {
-          const charged = item.daily_slot_charged === true ? "本次占用 1 个名额" : "本次未占用名额";
-          details.push("名额：" + charged + "；今日已用 " + item.daily_slots_used + "/" + item.daily_slots_limit + "；剩余 " + item.daily_slots_remaining);
+          const charged = item.daily_slot_charged === true ? "本次占用" : "本次未占用";
+          details.push("活动预算（非计费）：" + charged + "；今日已用 " + item.daily_slots_used + "/" + item.daily_slots_limit + "；剩余 " + item.daily_slots_remaining);
         } else {
-          details.push("名额：旧记录未保存名额快照");
+          details.push("活动预算（非计费）：旧记录未保存快照");
         }
       }
       if (details.length) article.append(node("div", "meta", details.join(" · ")));

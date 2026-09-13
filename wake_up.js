@@ -1060,7 +1060,7 @@ async function runActivityCheck() {
   };
   saveActivityState(nextState);
   console.log(JSON.stringify({
-    event: "activity_model_request",
+    event: "activity_budget_reserved",
     idle_minutes: gate.idleMinutes,
     daily_slot: nextState.count,
     daily_limit: maxPerDay,
@@ -1084,6 +1084,7 @@ async function runActivityCheck() {
     : "";
 
   let result;
+  let modelRequestCount = 0;
   try {
     result = await runActivityCycle({
       apiUrl: process.env.TARGET_API_URL,
@@ -1091,6 +1092,14 @@ async function runActivityCheck() {
       model: activityModel,
       backupModel: activityBackupModel,
       logger: console,
+      onModelAttempt: ({ model }) => {
+        modelRequestCount += 1;
+        console.log(JSON.stringify({
+          event: "activity_model_attempt",
+          attempt: modelRequestCount,
+          model
+        }));
+      },
       modelTimeoutMs: WAKE_UPSTREAM_TIMEOUT_MS,
       systemPrompt,
       history,
@@ -1193,6 +1202,7 @@ async function runActivityCheck() {
     game_outcome: result.gameOutcome || "",
     reason: result.reason || "",
     failure_kind: result.failureKind || "",
+    model_request_count: modelRequestCount,
     daily_slot_charged: budgetCharged,
     daily_slots_used: nextState.count,
     daily_slots_limit: maxPerDay,
@@ -1215,6 +1225,7 @@ async function runActivityCheck() {
     action: result.decision?.action || "unknown",
     track_uri: result.trackUri || "",
     reason: result.reason || result.decision?.reason || "",
+    model_request_count: modelRequestCount,
     daily_slot_charged: budgetCharged,
     daily_slots_used: nextState.count,
     daily_slots_limit: maxPerDay,

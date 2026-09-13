@@ -162,14 +162,18 @@ async function requestSoloModel({
   timeoutMs = 300_000,
   fetchImpl = fetch,
   temperature = 0.9,
-  topP = 0.95
+  topP = 0.95,
+  onAttempt
 }) {
-  const request = selectedModel => fetchImpl(apiUrl, {
-    method: "POST",
-    signal: AbortSignal.timeout(Math.max(1000, Number(timeoutMs) || 300_000)),
-    headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ model: selectedModel, messages, temperature, top_p: topP, stream: false })
-  });
+  const request = selectedModel => {
+    onAttempt?.({ model: selectedModel });
+    return fetchImpl(apiUrl, {
+      method: "POST",
+      signal: AbortSignal.timeout(Math.max(1000, Number(timeoutMs) || 300_000)),
+      headers: { "content-type": "application/json", authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({ model: selectedModel, messages, temperature, top_p: topP, stream: false })
+    });
+  };
   const attemptedModels = [model];
   let selectedModel = model;
   let response = await request(model);

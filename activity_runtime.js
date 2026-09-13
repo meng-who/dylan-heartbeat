@@ -413,6 +413,7 @@ async function requestGamePlan(options, { game, guide, state, catalog }) {
     fetchImpl: options.fetchImpl || fetch,
     temperature: 0.35,
     topP: 0.9,
+    onAttempt: options.onModelAttempt,
     messages: [
       {
         role: "system",
@@ -521,7 +522,8 @@ async function requestActivityDecision(options, messages) {
     timeoutMs: options.modelTimeoutMs,
     fetchImpl: options.fetchImpl || fetch,
     temperature: 0.4,
-    topP: 0.9
+    topP: 0.9,
+    onAttempt: options.onModelAttempt
   });
   try {
     return parseActivityDecision(raw);
