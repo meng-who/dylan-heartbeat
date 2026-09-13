@@ -19,6 +19,18 @@ function getRecentSentPushes(messages = [], limit = 5) {
     .slice(-Math.max(1, Number(limit) || 5));
 }
 
+function getLatestSentPushTime(messages = [], parseTimestamp) {
+  if (typeof parseTimestamp !== "function") return null;
+  const list = Array.isArray(messages) ? messages : [];
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const content = list[index]?.content;
+    if (!extractSentPush(content)) continue;
+    const parsed = parseTimestamp(content);
+    if (parsed instanceof Date && !Number.isNaN(parsed.getTime())) return parsed;
+  }
+  return null;
+}
+
 function normalizePushText(value) {
   return String(value || "")
     .toLowerCase()
@@ -84,6 +96,7 @@ module.exports = {
   diceSimilarity,
   extractSentPush,
   findSimilarRecentPush,
+  getLatestSentPushTime,
   getRecentSentPushes,
   normalizePushText,
   topics

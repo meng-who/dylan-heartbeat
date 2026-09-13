@@ -4,6 +4,7 @@ const test = require("node:test");
 const {
   extractSentPush,
   findSimilarRecentPush,
+  getLatestSentPushTime,
   getRecentSentPushes
 } = require("../wake_dedup");
 
@@ -16,6 +17,18 @@ test("extracts recent Bark and ntfy push payloads from timeline events", () => {
     extractSentPush("（2026-09-09 10:10 刚刚给用户发了ntfy推送：Dylan｜去吃午饭。）"),
     { title: "Dylan", body: "去吃午饭。" }
   );
+});
+
+test("finds the latest successful push time and ignores no-action events", () => {
+  const latest = getLatestSentPushTime([
+    { content: "（2026-09-09 08:00 刚刚给用户发了Bark推送：Dylan｜第一条）" },
+    { content: "（2026-09-09 09:00 自动唤醒：本次未发送推送）" },
+    { content: "（2026-09-09 10:30 刚刚给用户发了ntfy推送：Dylan｜第二条）" }
+  ], content => {
+    const match = String(content).match(/(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2})/);
+    return match ? new Date(`${match[1]}T${match[2]}:00+08:00`) : null;
+  });
+  assert.equal(latest.toISOString(), "2026-09-09T02:30:00.000Z");
 });
 
 test("keeps only the latest sent pushes and ignores no-action events", () => {

@@ -2265,11 +2265,11 @@ const html = `<!DOCTYPE html>
         <div class="section-title">Wake Settings</div>
         <div class="grid-2">
           <div>
-            <label>白天多久未回复后唤醒（分钟）</label>
+            <label>白天未回复等待 / 推送冷却（分钟）</label>
             <input type="number" min="1" name="day_wake_after" id="f_day_wake_after" value="${escapeHtml(wakeConfig.dayWakeAfter)}">
           </div>
           <div>
-            <label>夜间多久未回复后唤醒（分钟）</label>
+            <label>夜间未回复等待 / 推送冷却（分钟）</label>
             <input type="number" min="1" name="night_wake_after" id="f_night_wake_after" value="${escapeHtml(wakeConfig.nightWakeAfter)}">
           </div>
           <div>

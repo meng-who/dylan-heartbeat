@@ -343,7 +343,7 @@ WAKE_DAY_END_HOUR=24
 
 说明：
 
-- `DAY_WAKE_AFTER_MINUTES` / `NIGHT_WAKE_AFTER_MINUTES`：距离最后一条用户消息多久后允许唤醒。
+- `DAY_WAKE_AFTER_MINUTES` / `NIGHT_WAKE_AFTER_MINUTES`：距离最后一条用户消息、以及距离上次成功推送，都达到这个时长后才允许唤醒。成功推送时间保存在时间线中，因此重新部署不会绕过冷却。
 - `DAY_CHECK_INTERVAL_MINUTES` / `NIGHT_CHECK_INTERVAL_MINUTES`：后台多久检查一次是否应该唤醒。
 - `WAKE_DAY_START_HOUR` / `WAKE_DAY_END_HOUR`：哪一段时间算“白天”；不在白天范围内就按夜间策略处理。
 

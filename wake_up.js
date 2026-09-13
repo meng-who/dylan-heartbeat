@@ -11,7 +11,7 @@ const {
   repairWrongLocalGreeting
 } = require("./wake_guardrails");
 const { isSpecialEventContent } = require("./special_events");
-const { findSimilarRecentPush, getRecentSentPushes } = require("./wake_dedup");
+const { findSimilarRecentPush, getLatestSentPushTime, getRecentSentPushes } = require("./wake_dedup");
 const { appendWakeArchive, buildWakeArchiveOutcome } = require("./wake_archive");
 const { runSoloCycle } = require("./solo_runtime");
 const {
@@ -550,10 +550,31 @@ async function runWakeUp() {
     return;
   }
 
+  const wakeAfterMinutes = getWakeAfterMinutes(now);
+  const lastSentPushTime = getLatestSentPushTime(
+    messages,
+    content => parseLeadingZonedTimestamp(normalizeContentToText(content), TIME_ZONE)
+  );
+  if (lastSentPushTime) {
+    const minutesSinceLastPush = Math.floor((now - lastSentPushTime) / 60_000);
+    if (minutesSinceLastPush < wakeAfterMinutes) {
+      console.log(JSON.stringify({
+        event: "wake_skip",
+        reason: "recent_push",
+        minutes_since_last_push: minutesSinceLastPush,
+        push_cooldown_minutes: wakeAfterMinutes,
+        last_push_time: lastSentPushTime.toISOString(),
+        time_zone: TIME_ZONE
+      }));
+      console.log("\n距离上次成功推送还未达到冷却时间\n");
+      return;
+    }
+  }
+
   console.log(JSON.stringify({
     event: "wake_due",
     diff_minutes: diffMinutes,
-    wake_after_minutes: getWakeAfterMinutes(now),
+    wake_after_minutes: wakeAfterMinutes,
     current_time: formatDateTimeInTimeZone(now, TIME_ZONE),
     last_user_time: lastUserTime.toISOString(),
     last_user_time_source: lastUserActivity.source,
