@@ -62,6 +62,7 @@ const TOPIC_PATTERNS = {
   food: /吃饭|早餐|午饭|晚饭|饿|饭点/,
   hydration: /喝水|补水|水杯|口渴/,
   longing: /想你|来找我|陪我|看看我|想见你/,
+  checkin: /还好吗|怎么样|好不好|在干嘛|忙完了吗|顺利吗|今天过得/,
   work: /工作|上班|下班|加班|忙完|摸鱼/,
   weather: /天气|下雨|降温|升温|冷|热|带伞/
 };
@@ -74,17 +75,17 @@ function topics(value) {
 }
 
 function findSimilarRecentPush(candidate, recentPushes = []) {
-  const candidateText = `${candidate?.title || ""} ${candidate?.body || ""}`.trim();
+  const candidateText = String(candidate?.body || candidate?.title || "").trim();
   const candidateTopics = topics(candidateText);
 
   for (let i = recentPushes.length - 1; i >= 0; i--) {
     const previous = recentPushes[i];
-    const previousText = `${previous.title || ""} ${previous.body || ""}`.trim();
+    const previousText = String(previous.body || previous.title || "").trim();
     const similarity = diceSimilarity(candidateText, previousText);
-    if (similarity >= 0.55) return { matched: true, reason: "similar_text", similarity };
+    if (similarity >= 0.45) return { matched: true, reason: "similar_text", similarity };
 
     const sharedTopics = candidateTopics.filter(topic => topics(previousText).includes(topic));
-    if (sharedTopics.length > 0 && normalizePushText(candidateText).length <= 60 && normalizePushText(previousText).length <= 60) {
+    if (sharedTopics.length > 0 && normalizePushText(candidateText).length <= 100 && normalizePushText(previousText).length <= 100) {
       return { matched: true, reason: `repeated_topic:${sharedTopics[0]}`, similarity };
     }
   }

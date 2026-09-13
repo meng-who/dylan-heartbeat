@@ -291,9 +291,12 @@ function getWakeHistoryMessages(messages = []) {
     )
   );
   const original = Array.isArray(messages) ? messages : [];
-  const list = original.filter(message => (
-    message?.role !== "assistant" || !isSpecialEventContent(normalizeContentToText(message.content))
-  ));
+  const list = original.filter(message => {
+    if (message?.role === "system") return true;
+    if (!["user", "assistant"].includes(message?.role)) return false;
+    const content = normalizeContentToText(message.content);
+    return content.trim().length > 0 && !isSpecialEventContent(content);
+  });
   const system = list.filter(msg => msg?.role === "system").slice(-1);
   const nonSystem = list.filter(msg => msg?.role !== "system").slice(-maxWakeMessages);
   const messageLimited = [...system, ...nonSystem];

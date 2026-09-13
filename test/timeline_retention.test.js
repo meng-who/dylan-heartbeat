@@ -42,3 +42,25 @@ test("retains the latest system prompt", () => {
 
   assert.equal(retained[0].content, "new persona");
 });
+
+test("tool traffic does not evict readable conversation history", () => {
+  const retained = retainTimelineMessages([
+    { role: "system", content: "persona" },
+    { role: "user", content: "你记得那篇论文吗" },
+    { role: "assistant", content: "记得，我们刚聊到结论。" },
+    { role: "assistant", content: "", tool_calls: [{ id: "call-1" }] },
+    { role: "tool", content: "very long search result", tool_call_id: "call-1" },
+    { role: "user", content: "明天继续看" }
+  ], {
+    maxRealMessages: 3,
+    isSpecialEvent: isEvent,
+    isConversationMessage: message => (
+      ["user", "assistant"].includes(message?.role)
+      && String(message.content || "").trim().length > 0
+    )
+  });
+
+  assert.deepEqual(retained.map(message => message.content), [
+    "persona", "你记得那篇论文吗", "记得，我们刚聊到结论。", "明天继续看"
+  ]);
+});

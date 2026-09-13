@@ -57,6 +57,15 @@ test("rejects a short repeat of the same generic topic", () => {
   assert.match(result.reason, /^repeated_topic:/);
 });
 
+test("rejects a longer paraphrase with the same check-in intent", () => {
+  const result = findSimilarRecentPush(
+    { title: "Dylan", body: "刚才想到你今天可能一直在忙，想问问现在还好吗，手头的事情进行得顺利吗？不用急着回复。" },
+    [{ title: "Dylan", body: "不知道你今天过得怎么样，工作是不是还顺利。忙完以后再来告诉我一声就好。" }]
+  );
+  assert.equal(result.matched, true);
+  assert.match(result.reason, /^repeated_topic:/);
+});
+
 test("allows a genuinely different concrete follow-up", () => {
   const result = findSimilarRecentPush(
     { title: "Dylan", body: "你说的新键盘到货了吗？" },

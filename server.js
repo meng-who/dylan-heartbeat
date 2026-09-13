@@ -307,7 +307,11 @@ function saveTimeline(messages) {
   const final = retainTimelineMessages(messages, {
     maxRealMessages: maxTimelineMessages,
     maxSpecialEvents,
-    isSpecialEvent
+    isSpecialEvent,
+    isConversationMessage: message => (
+      ["user", "assistant"].includes(message?.role)
+      && normalizeContentToText(message.content).trim().length > 0
+    )
   });
   writeJsonAtomicSync(TIMELINE_FILE, final);
 }
