@@ -1147,9 +1147,9 @@ async function runActivityCheck() {
     };
   }
 
-  const budgetCharged = shouldChargeActivityBudget(result);
+  const budgetCharged = shouldChargeActivityBudget(result, modelRequestCount);
   if (!budgetCharged) {
-    // Keep last_run_at as a cooldown, but return the daily slot after model-side failures.
+    // Keep last_run_at as a cooldown, but refund failures that happened before any model request.
     nextState.count = gate.used;
     nextState.last_model_failure_at = now.toISOString();
     saveActivityState(nextState);

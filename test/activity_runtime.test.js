@@ -10,7 +10,8 @@ const {
   parseGamePlan,
   requestActivityDecision,
   runActivityCycle,
-  shouldChargeActivityBudget
+  shouldChargeActivityBudget,
+  validateGameCommands
 } = require("../activity_runtime");
 
 test("activity budget is independent from the ordinary wake threshold", () => {
@@ -46,21 +47,21 @@ test("parses a fenced Spotify activity decision", () => {
   });
 });
 
-test("model-side failures do not consume the daily activity budget", () => {
+test("model attempts consume budget while preflight failures do not", () => {
   const requestError = new Error("Solo 模型请求失败 HTTP 503");
   requestError.attemptedModels = ["primary", "backup"];
   assert.equal(classifyActivityFailure(requestError), "model_request");
-  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "model_request" }), false);
+  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "model_request" }, 2), true);
 
   const outputError = new Error("Activity 模型没有返回可识别的动作标签");
   outputError.activityStage = "model_output";
   assert.equal(classifyActivityFailure(outputError), "model_output");
-  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "model_output" }), false);
+  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "model_output" }, 1), true);
 
   const preflightError = new Error("Remote MCP tool play failed");
   preflightError.activityStage = "game_preflight";
   assert.equal(classifyActivityFailure(preflightError), "game_preflight");
-  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "game_preflight" }), false);
+  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "game_preflight" }, 0), false);
 });
 
 test("completed decisions and tool failures still consume a decision slot", () => {
@@ -79,6 +80,22 @@ test("parses safe Ombre activity decisions", () => {
     aspect: "becoming",
     reason: "反复出现"
   });
+});
+
+test("accepts the complete safe garden command set and normalizes common shorthand", () => {
+  const commands = [
+    "shop", "buy daisy 2", "plant daisy 1", "water 1", "harvest all",
+    "make_bouquet bouquet_id=spring message=送给你", "sell rose 1", "treat 2",
+    "clear 3", "buy_pot", "arrange tulip", "vase", "remove_vase 1",
+    "adopt 小花", "rename_cat 小雨", "feed basic", "give_water", "pet",
+    "play ball", "encyclopedia", "collectibles", "letters", "status", "help",
+    "cmd water", "harvest mature flowers", "feed premium_food 1", "pet the cat"
+  ];
+  const normalized = validateGameCommands("garden_cat", commands);
+  assert.deepEqual(normalized.slice(-4), ["water all", "harvest all", "feed premium", "pet"]);
+  assert.throws(() => validateGameCommands("garden_cat", ["notes 1"]), /不允许/);
+  assert.throws(() => validateGameCommands("garden_cat", ["new"]), /不允许/);
+  assert.throws(() => validateGameCommands("garden_cat", ["account rotate_token"]), /不允许/);
 });
 
 test("normalizes equivalent Spotify search wording for duplicate checks", () => {
@@ -524,7 +541,7 @@ test("forced garden testing skips the activity choice and uses one model call", 
     calls.push({ url, body });
     if (url === "https://model.test/v1/chat/completions") {
       const outputs = [
-        '{"commands":["harvest all","sell all","feed premium_food","give_water","pet"],"summary":"收花并照顾猫咪"}'
+        '{"commands":["harvest mature flowers","sell all flowers","feed premium_food 1","water flowers","give water","pet the cat","play with feather","buy pot 1"],"summary":"收花并照顾猫咪"}'
       ];
       return reply({ choices: [{ message: { content: outputs[modelCall++] } }] });
     }
@@ -554,12 +571,12 @@ test("forced garden testing skips the activity choice and uses one model call", 
 
   assert.equal(result.status, "success");
   assert.equal(result.gameName, "garden_cat");
-  assert.equal(result.gameSteps.length, 5);
+  assert.equal(result.gameSteps.length, 8);
   assert.equal(modelCall, 1);
   assert.deepEqual(attemptedModels, ["model"]);
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
-  assert.deepEqual(toolCalls.slice(-5).map(call => call.arguments.params.command), [
-    "harvest all", "sell all", "feed premium", "give_water", "pet"
+  assert.deepEqual(toolCalls.slice(-8).map(call => call.arguments.params.command), [
+    "harvest all", "sell all", "feed premium", "water all", "give_water", "pet", "play feather", "buy_pot"
   ]);
   assert.equal(toolCalls.some(call => call.name === "account"), false);
 });

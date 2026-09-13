@@ -4,6 +4,10 @@ const { requestSoloModel } = require("./solo_runtime");
 const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum", "games"]);
 const SELF_ASPECTS = new Set(["nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"]);
 const AUTONOMOUS_GAMES = new Set(["fishing", "garden_cat"]);
+const GAME_COMMAND_RULES = {
+  fishing: "只可使用：cast [次数] [stop=rare,new,event]；shop；buy <物品ID> <数量>；goto [地点ID]；sell all/species <鱼ID>/item <物品ID>；encyclopedia；dive；choose <编号>；surface；status；help。",
+  garden_cat: "只可使用：shop；buy <商品ID> [数量]；plant <花ID> <盆号>；water <盆号|all>；harvest <盆号|all>；make_bouquet [bouquet_id=<ID>] [message=<留言>]；sell <花ID> [数量]/all；treat/clear <盆号>；buy_pot；arrange <花ID>；vase；remove_vase <位置>；adopt [名字]；rename_cat <名字>；feed <basic|premium>；give_water；pet；play <ball|feather>；encyclopedia；collectibles；letters；status；help。不要使用 premium_food/basic_food 作为 feed 参数，不要省略 water/harvest 的参数。"
+};
 
 function parseEnabledActions(value) {
   const actions = String(value || "spotify")
@@ -109,7 +113,8 @@ function classifyActivityFailure(error) {
   return "tool_execution";
 }
 
-function shouldChargeActivityBudget(result) {
+function shouldChargeActivityBudget(result, modelRequestCount = 0) {
+  if (Number(modelRequestCount) > 0) return true;
   return !(result?.status === "failed" && ["model_request", "model_output", "game_preflight"].includes(result.failureKind));
 }
 
@@ -393,13 +398,31 @@ function parseGamePlan(value) {
   };
 }
 
+function normalizeGameCommand(game, command) {
+  let normalized = String(command || "").trim().replace(/^cmd\s+/i, "");
+  if (game === "fishing") {
+    return normalized
+      .replace(/^cast\s+(\d+)\s+times?$/i, "cast $1")
+      .replace(/^sell\s+all\s+fish$/i, "sell all");
+  }
+  return normalized
+    .replace(/^feed\s+(basic|premium)(?:_food)?(?:\s+\d+)?$/i, "feed $1")
+    .replace(/^water$/i, "water all")
+    .replace(/^water\s+(?:all\s+)?(?:pots?|flowers?)$/i, "water all")
+    .replace(/^harvest$/i, "harvest all")
+    .replace(/^harvest\s+(?:(?:all|mature)\s+)*(?:flowers?)$/i, "harvest all")
+    .replace(/^sell\s+all\s+flowers?$/i, "sell all")
+    .replace(/^buy\s+pot(?:\s+1)?$/i, "buy_pot")
+    .replace(/^(?:give\s+water|water(?:\s+the)?\s+cat)$/i, "give_water")
+    .replace(/^pet(?:\s+the)?\s+cat$/i, "pet")
+    .replace(/^play\s+(?:with\s+)?(ball|feather)$/i, "play $1");
+}
+
 function validateGameCommands(game, commands) {
-  const normalizedCommands = game === "garden_cat"
-    ? commands.map(command => command.replace(/^feed\s+(basic|premium)_food$/i, "feed $1"))
-    : commands;
+  const normalizedCommands = commands.map(command => normalizeGameCommand(game, command));
   const allowed = game === "fishing"
     ? /^(?:cast(?:\s+\d+)?(?:\s+stop=(?:rare|new|event)(?:,(?:rare|new|event))*)?|shop|buy\s+[a-z0-9_]+\s+\d+|goto(?:\s+[a-z0-9_-]+)?|sell\s+(?:all|species\s+[a-z0-9_-]+|item\s+[a-z0-9_-]+)|encyclopedia|dive|choose\s+\d+|surface|status|help)$/i
-    : /^(?:shop|buy\s+[a-z0-9_]+(?:\s+\d+)?|plant\s+[a-z0-9_]+\s+\d+|water\s+(?:all|\d+)|harvest\s+(?:all|\d+)|sell\s+(?:all|[a-z0-9_]+(?:\s+\d+)?)|treat\s+\d+|clear\s+\d+|buy_pot|arrange\s+[a-z0-9_]+|vase|remove_vase\s+\d+|adopt(?:\s+\S{1,20})?|rename_cat\s+\S{1,20}|feed\s+(?:basic|premium)|give_water|pet|play\s+(?:ball|feather)|encyclopedia|collectibles|letters|status|help)$/iu;
+    : /^(?:shop|buy\s+[a-z0-9_]+(?:\s+\d+)?|plant\s+[a-z0-9_]+\s+\d+|water\s+(?:all|\d+)|harvest\s+(?:all|\d+)|make_bouquet(?:\s+bouquet_id=[a-z0-9_-]+)?(?:\s+message=.{1,80})?|sell\s+(?:all|[a-z0-9_]+(?:\s+\d+)?)|treat\s+\d+|clear\s+\d+|buy_pot|arrange\s+[a-z0-9_]+|vase|remove_vase\s+\d+|adopt(?:\s+\S{1,20})?|rename_cat\s+\S{1,20}|feed\s+(?:basic|premium)|give_water|pet|play\s+(?:ball|feather)|encyclopedia|collectibles|letters|status|help)$/iu;
   for (const command of normalizedCommands) {
     if (!allowed.test(command)) throw new Error(`游戏计划包含不允许的 ${game} 命令：${command}`);
   }
@@ -428,6 +451,7 @@ async function requestGamePlan(options, { game, guide, state, catalog }) {
           `游戏指南：\n${trimContext(guide, 14000)}`,
           catalog ? `目录或商店：\n${trimContext(catalog, 9000)}` : "",
           `当前状态：\n${trimContext(state, 9000)}`,
+          `程序接受的精确命令格式：\n${GAME_COMMAND_RULES[game]}`,
           `输出 {"commands":["命令1","命令2"],"summary":"本轮打算做什么"}。commands 最多 8 条；没有合适操作时可以为空。只输出 JSON。`
         ].filter(Boolean).join("\n\n")
       }
@@ -750,5 +774,6 @@ module.exports = {
   resolvePlaylistAddAction,
   runGameSession,
   runActivityCycle,
-  shouldChargeActivityBudget
+  shouldChargeActivityBudget,
+  validateGameCommands
 };

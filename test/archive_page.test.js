@@ -27,7 +27,7 @@ test("archive page client script is valid JavaScript", () => {
   assert.match(html, /模型请求：0 次（未请求模型）/);
   assert.match(html, /实际计费以模型供应商为准/);
   assert.match(html, /模型请求：旧记录未统计/);
-  assert.match(html, /活动预算（非计费）/);
+  assert.match(html, /活动预算（控制调用频率）/);
   assert.match(html, /本次占用/);
   assert.match(html, /今日已用/);
   assert.match(html, /剩余/);

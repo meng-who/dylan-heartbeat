@@ -1410,9 +1410,9 @@ function archivePageHtml() {
           && Number.isFinite(Number(item.daily_slots_remaining));
         if (hasSlotSnapshot) {
           const charged = item.daily_slot_charged === true ? "本次占用" : "本次未占用";
-          details.push("活动预算（非计费）：" + charged + "；今日已用 " + item.daily_slots_used + "/" + item.daily_slots_limit + "；剩余 " + item.daily_slots_remaining);
+          details.push("活动预算（控制调用频率）：" + charged + "；今日已用 " + item.daily_slots_used + "/" + item.daily_slots_limit + "；剩余 " + item.daily_slots_remaining);
         } else {
-          details.push("活动预算（非计费）：旧记录未保存快照");
+          details.push("活动预算（控制调用频率）：旧记录未保存快照");
         }
       }
       if (details.length) article.append(node("div", "meta", details.join(" · ")));
