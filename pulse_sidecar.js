@@ -10,6 +10,7 @@ const PULSE_REACTION_OPEN_SOURCE = `${PULSE_REACTION_LT}\\s*${PULSE_REACTION_NAM
 const PULSE_REACTION_CLOSE_SOURCE = `${PULSE_REACTION_LT}\\s*\/\\s*${PULSE_REACTION_NAME}\\s*${PULSE_REACTION_GT}`;
 const PULSE_REACTION_BLOCK = new RegExp(`${PULSE_REACTION_OPEN_SOURCE}\\s*([\\s\\S]*?)\\s*${PULSE_REACTION_CLOSE_SOURCE}`, "i");
 const PULSE_REACTION_BLOCK_GLOBAL = new RegExp(PULSE_REACTION_BLOCK.source, "gi");
+const PULSE_REACTION_OPEN = new RegExp(PULSE_REACTION_OPEN_SOURCE, "i");
 const PULSE_REACTION_START = new RegExp(`${PULSE_REACTION_OPEN_SOURCE}[\\s\\S]*$`, "i");
 const PULSE_REACTION_CLOSE = new RegExp(PULSE_REACTION_CLOSE_SOURCE, "i");
 const PULSE_REACTION_OPENINGS = [
@@ -17,6 +18,7 @@ const PULSE_REACTION_OPENINGS = [
   "\\<pulse_reaction>", "\\<pulse_reaction\\>", "\\<pulse\\_reaction>", "\\<pulse\\_reaction\\>",
   "&lt;pulse_reaction&gt;", "&lt;pulse\\_reaction&gt;"
 ];
+const PULSE_REACTION_CLOSINGS = PULSE_REACTION_OPENINGS.map(opening => opening.replace("pulse", "/pulse"));
 const STATUS_LINE = /^\s*(?:>\s*)?♡\s*\d{2,3}\s*bpm\s*·[^\n]*(?:\r?\n){1,2}/u;
 const DEFAULT_STREAM_FINALIZE_WAIT_MS = 750;
 
@@ -197,6 +199,67 @@ function couldStartWithPulseReaction(text) {
   return !afterFence || PULSE_REACTION_OPENINGS.some(opening => opening.startsWith(afterFence) || afterFence.startsWith(opening));
 }
 
+function trailingPrefixLength(text, candidates) {
+  const value = String(text || "").toLowerCase();
+  let longest = 0;
+  for (let start = Math.max(0, value.length - 40); start < value.length; start += 1) {
+    const suffix = value.slice(start);
+    if (candidates.some(candidate => candidate.startsWith(suffix))) longest = Math.max(longest, suffix.length);
+  }
+  return longest;
+}
+
+// Once visible text has started streaming, models may still emit the private
+// reaction block late or split either tag across SSE chunks. Keep scanning the
+// entire response and fail closed for an unfinished private block.
+function createPulseReactionScrubber() {
+  let buffer = "";
+  let insideReaction = false;
+  return {
+    push(text, final = false) {
+      buffer += String(text || "");
+      let visible = "";
+      while (buffer) {
+        if (!insideReaction) {
+          const opening = buffer.match(PULSE_REACTION_OPEN);
+          if (opening) {
+            visible += buffer.slice(0, opening.index);
+            buffer = buffer.slice(opening.index + opening[0].length);
+            insideReaction = true;
+            continue;
+          }
+          if (final) {
+            visible += buffer;
+            buffer = "";
+            break;
+          }
+          const carryLength = trailingPrefixLength(buffer, PULSE_REACTION_OPENINGS);
+          visible += buffer.slice(0, buffer.length - carryLength);
+          buffer = buffer.slice(buffer.length - carryLength);
+          break;
+        }
+
+        const closing = buffer.match(PULSE_REACTION_CLOSE);
+        if (closing) {
+          buffer = buffer.slice(closing.index + closing[0].length);
+          insideReaction = false;
+          continue;
+        }
+        if (final) {
+          // Never expose a partial private JSON block at the end of a response.
+          buffer = "";
+          insideReaction = false;
+          break;
+        }
+        const carryLength = trailingPrefixLength(buffer, PULSE_REACTION_CLOSINGS);
+        buffer = buffer.slice(buffer.length - carryLength);
+        break;
+      }
+      return visible;
+    }
+  };
+}
+
 async function settleWithin(promise, waitMs) {
   let timer;
   try {
@@ -328,6 +391,7 @@ function semanticPulseSseStream(body, {
       let prefixed = false;
       let sawDone = false;
       let hasToolCall = false;
+      const lateReactionScrubber = createPulseReactionScrubber();
 
       const emit = value => { if (value) controller.enqueue(encoder.encode(value)); };
       const resolvePending = async () => {
@@ -373,6 +437,13 @@ function semanticPulseSseStream(body, {
         const data = line.slice(5).trimStart();
         if (data === "[DONE]") {
           if (!resolved) await resolvePending();
+          const trailingVisible = lateReactionScrubber.push("", true);
+          if (trailingVisible && template) {
+            const payload = structuredClone(template);
+            const choice = payload.choices?.find(item => item?.delta);
+            if (choice) choice.delta = { ...choice.delta, content: trailingVisible };
+            emit(`data: ${JSON.stringify(payload)}\n\n`);
+          }
           emit("data: [DONE]\n\n");
           sawDone = true;
           return;
@@ -389,9 +460,12 @@ function semanticPulseSseStream(body, {
         if (toolCallChoice) hasToolCall = true;
         const choice = payload.choices?.find(item => typeof item?.delta?.content === "string");
         if (resolved) {
-          if (choice && !prefixed && fallbackStatusBar) {
-            choice.delta.content = `${fallbackStatusBar}\n\n${choice.delta.content}`;
-            prefixed = true;
+          if (choice) {
+            choice.delta.content = lateReactionScrubber.push(choice.delta.content);
+            if (!prefixed && fallbackStatusBar && choice.delta.content) {
+              choice.delta.content = `${fallbackStatusBar}\n\n${choice.delta.content}`;
+              prefixed = true;
+            }
             emit(`data: ${JSON.stringify(payload)}\n`);
           } else emit(`${line}\n`);
           return;

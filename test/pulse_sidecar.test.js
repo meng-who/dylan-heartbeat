@@ -349,3 +349,33 @@ test("preserves a long multi-chunk response after stripping the Pulse header", a
   assert.ok(visible.length >= parts.join("").length);
   assert.doesNotMatch(visible, /pulse_reaction|confidence/);
 });
+
+test("strips a late escaped Pulse block split across streamed chunks", async () => {
+  const encoder = new TextEncoder();
+  const hidden = '\\<pulse\\_reaction>{"confidence":0.9,"emotion":null,"senses":[]}\\</pulse\\_reaction>';
+  const chunks = [
+    "正文先出现。",
+    hidden.slice(0, 9),
+    hidden.slice(9, 43),
+    hidden.slice(43),
+    "正文继续。"
+  ];
+  const source = new ReadableStream({ start(controller) {
+    for (const content of chunks) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n`));
+    }
+    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    controller.close();
+  }});
+  const output = await new Response(semanticPulseSseStream(source, {
+    fallbackStatusBar: "♡ status",
+    finalize: async () => ({ statusBar: "♡ status" })
+  })).text();
+  const visible = output.split(/\r?\n/)
+    .filter(line => line.startsWith("data:") && !line.includes("[DONE]"))
+    .map(line => JSON.parse(line.slice(5)).choices?.[0]?.delta?.content || "")
+    .join("");
+  assert.match(visible, /正文先出现。/);
+  assert.match(visible, /正文继续。/);
+  assert.doesNotMatch(visible, /pulse\\?_reaction|confidence|senses/);
+});
