@@ -27,7 +27,9 @@ const {
   readWakeArchive
 } = require("./wake_archive");
 const {
+  addPulseOutputHeadroom,
   applyHttpResilience,
+  createSseDiagnostics,
   isToolFollowUp,
   requestTraceId
 } = require("./http_resilience");
@@ -949,6 +951,17 @@ app.post("/v1/chat/completions", async (req, reply) => {
 
     const primaryModel = String(body?.model || "").trim();
     const backupModel = String(process.env.BACKUP_MODEL_NAME || "").trim();
+    const upstreamBody = addPulseOutputHeadroom(body, Boolean(pulseContext && semanticPulseEnabled));
+    if (upstreamBody !== body) {
+      console.log(JSON.stringify({
+        event: "pulse_output_headroom",
+        request_id: requestId,
+        requested_max_tokens: body?.max_tokens ?? null,
+        forwarded_max_tokens: upstreamBody?.max_tokens ?? null,
+        requested_max_completion_tokens: body?.max_completion_tokens ?? null,
+        forwarded_max_completion_tokens: upstreamBody?.max_completion_tokens ?? null
+      }));
+    }
     requestStage = "upstream_waiting_headers";
     console.log(JSON.stringify({
       event: "llm_upstream_start",
@@ -961,7 +974,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.TARGET_API_KEY}`
       },
-      body: JSON.stringify({ ...body, messages: llmMessages }),
+      body: JSON.stringify({ ...upstreamBody, messages: llmMessages }),
       signal: upstreamAbort.signal
     });
     console.log(JSON.stringify({
@@ -995,7 +1008,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
             "Content-Type": "application/json",
             Authorization: `Bearer ${process.env.TARGET_API_KEY}`
           },
-          body: JSON.stringify({ ...body, model: backupModel, messages: llmMessages }),
+          body: JSON.stringify({ ...upstreamBody, model: backupModel, messages: llmMessages }),
           signal: upstreamAbort.signal
         });
       } else {
@@ -1069,6 +1082,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
         })
       : response.body;
     const reader = decoratedBody.getReader();
+    const streamDiagnostics = createSseDiagnostics();
     activeResponseReader = reader;
     while (true) {
       const { done, value } = await reader.read();
@@ -1077,8 +1091,16 @@ app.post("/v1/chat/completions", async (req, reply) => {
         await reader.cancel("Kelivo connection closed").catch(() => {});
         return;
       }
+      streamDiagnostics.push(value);
       reply.raw.write(value);
     }
+    console.log(JSON.stringify({
+      event: "llm_stream_complete",
+      request_id: requestId,
+      tool_followup: toolFollowUp,
+      elapsed_ms: Date.now() - requestStartedAt,
+      ...streamDiagnostics.finish()
+    }));
     reply.raw.end();
   } catch (err) {
     const clientDisconnected = upstreamAbort.signal.aborted || reply.raw.destroyed;

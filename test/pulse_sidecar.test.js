@@ -322,3 +322,30 @@ test("caps the wait for a slow semantic Pulse finalization", async () => {
   assert.match(output, /♡ fallback/);
   assert.doesNotMatch(output, /pulse_reaction/);
 });
+
+test("preserves a long multi-chunk response after stripping the Pulse header", async () => {
+  const encoder = new TextEncoder();
+  const hidden = '<pulse_reaction>{"confidence":0.9,"emotion":null,"senses":[]}</pulse_reaction>';
+  const parts = Array.from({ length: 80 }, (_, index) => `第${index + 1}段-${"内容".repeat(100)}`);
+  const source = new ReadableStream({ start(controller) {
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: hidden + parts[0] } }] })}\n\n`));
+    for (const part of parts.slice(1)) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: part } }] })}\n\n`));
+    }
+    controller.enqueue(encoder.encode(`data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n`));
+    controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+    controller.close();
+  }});
+  const output = await new Response(semanticPulseSseStream(source, {
+    fallbackStatusBar: "♡ status",
+    finalize: async () => ({ statusBar: "♡ status" })
+  })).text();
+  const visible = output.split(/\r?\n/)
+    .filter(line => line.startsWith("data:") && !line.includes("[DONE]"))
+    .map(line => JSON.parse(line.slice(5)).choices?.[0]?.delta?.content || "")
+    .join("");
+  assert.match(visible, /第1段/);
+  assert.match(visible, /第80段/);
+  assert.ok(visible.length >= parts.join("").length);
+  assert.doesNotMatch(visible, /pulse_reaction|confidence/);
+});
