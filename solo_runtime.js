@@ -163,7 +163,8 @@ async function requestSoloModel({
   fetchImpl = fetch,
   temperature = 0.9,
   topP = 0.95,
-  onAttempt
+  onAttempt,
+  onResponse
 }) {
   const request = selectedModel => {
     onAttempt?.({ model: selectedModel });
@@ -190,6 +191,7 @@ async function requestSoloModel({
     error.finalModel = selectedModel;
     throw error;
   }
+  onResponse?.({ model: selectedModel, status: response.status });
   const data = parseChatCompletionResponse(text, response.headers.get("content-type") || "");
   return contentText(data.choices?.[0]?.message?.content).trim();
 }

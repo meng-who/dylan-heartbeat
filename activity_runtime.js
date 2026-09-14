@@ -113,9 +113,22 @@ function classifyActivityFailure(error) {
   return "tool_execution";
 }
 
-function shouldChargeActivityBudget(result, modelRequestCount = 0) {
-  if (Number(modelRequestCount) > 0) return true;
+function shouldChargeActivityBudget(result, modelResponseCount = 0) {
+  if (Number(modelResponseCount) > 0) return true;
   return !(result?.status === "failed" && ["model_request", "model_output", "game_preflight"].includes(result.failureKind));
+}
+
+function normalizeLetterContent(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\p{P}\p{S}\s]+/gu, "");
+}
+
+function isDuplicateLetter(content, recentLetters) {
+  const normalized = normalizeLetterContent(content);
+  if (normalized.length < 12) return false;
+  return normalizeLetterContent(recentLetters).includes(normalized);
 }
 
 function activityGate({ now = new Date(), lastUserAt, state = {}, idleMinutes, intervalMinutes, maxPerDay, timeZone }) {
@@ -219,6 +232,7 @@ async function loadOmbreContext(options) {
   const tools = await client.listTools();
   const names = new Set(tools.map(tool => tool.name));
   const context = {};
+  let recentLetters = "";
   const failures = [];
   const read = async (key, tool, args) => {
     if (!names.has(tool)) {
@@ -233,8 +247,17 @@ async function loadOmbreContext(options) {
   };
   await read("feelings", "feel", { query: buildFeelingQuery(options.latestUserText, options.history), max_tokens: 2000 });
   await read("self", "I", { read: true, limit: 10 });
-  await read("letters", "letter_read", { limit: 4 });
-  return { client, tools, context, failures };
+  if (!names.has("letter_read")) {
+    failures.push("letter_read:missing");
+  } else {
+    try {
+      recentLetters = extractToolText(await client.callTool("letter_read", { limit: 4 }));
+      context.letters = trimContext(recentLetters, 8000);
+    } catch (error) {
+      failures.push(`letter_read:${error.message || String(error)}`);
+    }
+  }
+  return { client, tools, context, recentLetters, failures };
 }
 
 function extractToolData(result) {
@@ -550,7 +573,8 @@ async function requestActivityDecision(options, messages) {
     fetchImpl: options.fetchImpl || fetch,
     temperature: 0.4,
     topP: 0.9,
-    onAttempt: options.onModelAttempt
+    onAttempt: options.onModelAttempt,
+    onResponse: options.onModelResponse
   });
   try {
     return parseActivityDecision(raw);
@@ -724,6 +748,15 @@ async function runActivityCycle(options) {
     };
     }
     if (!ombre.tools.some(tool => tool.name === "letter_write")) throw new Error("Ombre MCP 缺少 letter_write 工具");
+    if (isDuplicateLetter(decision.content, ombre.recentLetters)) {
+      return {
+        ran: true,
+        status: "skipped",
+        reason: "recent_duplicate_letter",
+        decision,
+        source: "ombre"
+      };
+    }
     const letterArgs = {
       author: "ai",
       content: decision.content,
@@ -766,6 +799,8 @@ module.exports = {
   loadGamesContext,
   loadForumContext,
   loadOmbreContext,
+  isDuplicateLetter,
+  normalizeLetterContent,
   normalizeTrackQuery,
   parseActivityDecision,
   parseGamePlan,

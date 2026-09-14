@@ -1109,6 +1109,7 @@ async function runActivityCheck() {
 
   let result;
   let modelRequestCount = 0;
+  let modelResponseCount = 0;
   try {
     result = await runActivityCycle({
       apiUrl: process.env.TARGET_API_URL,
@@ -1122,6 +1123,15 @@ async function runActivityCheck() {
           event: "activity_model_attempt",
           attempt: modelRequestCount,
           model
+        }));
+      },
+      onModelResponse: ({ model, status }) => {
+        modelResponseCount += 1;
+        console.log(JSON.stringify({
+          event: "activity_model_response",
+          response: modelResponseCount,
+          model,
+          status
         }));
       },
       modelTimeoutMs: WAKE_UPSTREAM_TIMEOUT_MS,
@@ -1171,7 +1181,7 @@ async function runActivityCheck() {
     };
   }
 
-  const budgetCharged = shouldChargeActivityBudget(result, modelRequestCount);
+  const budgetCharged = shouldChargeActivityBudget(result, modelResponseCount);
   if (!budgetCharged) {
     // Keep last_run_at as a cooldown, but refund failures that happened before any model request.
     nextState.count = gate.used;
@@ -1227,6 +1237,7 @@ async function runActivityCheck() {
     reason: result.reason || "",
     failure_kind: result.failureKind || "",
     model_request_count: modelRequestCount,
+    model_response_count: modelResponseCount,
     daily_slot_charged: budgetCharged,
     daily_slots_used: nextState.count,
     daily_slots_limit: maxPerDay,
@@ -1250,6 +1261,7 @@ async function runActivityCheck() {
     track_uri: result.trackUri || "",
     reason: result.reason || result.decision?.reason || "",
     model_request_count: modelRequestCount,
+    model_response_count: modelResponseCount,
     daily_slot_charged: budgetCharged,
     daily_slots_used: nextState.count,
     daily_slots_limit: maxPerDay,

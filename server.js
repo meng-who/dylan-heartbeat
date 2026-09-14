@@ -1321,6 +1321,18 @@ function archivePageHtml() {
       return element;
     }
 
+    function appendArchiveText(article, className, text, label) {
+      const value = String(text || "");
+      if (value.length <= 400) {
+        article.append(node("div", className, value));
+        return;
+      }
+      const folded = node("details", "narrative");
+      folded.append(node("summary", "", (label || "查看完整内容") + "（" + value.length + " 字）"));
+      folded.append(node("div", "narrative-body " + className, value));
+      article.append(folded);
+    }
+
     async function loadArchive() {
       summary.textContent = "读取中...";
       records.replaceChildren();
@@ -1353,7 +1365,7 @@ function archivePageHtml() {
       head.append(node("time", "", item.local_time || item.created_at || "未知时间"));
       head.append(node("span", "model", item.model || "未知模型"));
       article.append(head);
-      if (item.kind === "solo" && item.summary) article.append(node("div", "candidate", item.summary));
+      if (item.kind === "solo" && item.summary) appendArchiveText(article, "candidate", item.summary, "查看完整摘要");
       if (item.kind === "activity") {
         const wasExecuted = item.status === "success";
         const summaryLabel = wasExecuted
@@ -1365,7 +1377,7 @@ function archivePageHtml() {
           item.summary && summaryLabel + item.summary,
           item.query && (wasExecuted ? "搜索：" : "拟搜索：") + item.query
         ].filter(Boolean).join("\\n");
-        if (activityText) article.append(node("div", "candidate", activityText));
+        if (activityText) appendArchiveText(article, "candidate", activityText, "查看完整构想");
       }
       const hasFinal = Boolean(item.final_title || item.final_body);
       const finalText = hasFinal
@@ -1376,10 +1388,10 @@ function archivePageHtml() {
         const candidateText = item.kind === "activity"
           ? (item.status === "success" ? "已写入内容：" : "拟写内容（未执行）：") + item.candidate
           : item.candidate;
-        article.append(node("div", "candidate", candidateText));
+        appendArchiveText(article, "candidate", candidateText, "查看完整内容");
       }
       if (hasFinal) {
-        article.append(node("div", "final", finalText));
+        appendArchiveText(article, "final", finalText, "查看完整推送");
       }
       if (item.kind === "solo" && item.narrative) {
         const narrative = node("details", "narrative");
@@ -1408,6 +1420,9 @@ function archivePageHtml() {
             : "模型请求：" + requestCount + " 次（实际计费以模型供应商为准）");
         } else {
           details.push("模型请求：旧记录未统计");
+        }
+        if (Number.isFinite(Number(item.model_response_count))) {
+          details.push("成功响应：" + Math.max(0, Number(item.model_response_count)) + " 次");
         }
         const hasSlotSnapshot = Number.isFinite(Number(item.daily_slots_used))
           && Number.isFinite(Number(item.daily_slots_limit))

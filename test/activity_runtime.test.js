@@ -5,6 +5,7 @@ const {
   activityGate,
   classifyActivityFailure,
   extractTrackUris,
+  isDuplicateLetter,
   normalizeTrackQuery,
   parseActivityDecision,
   parseGamePlan,
@@ -47,11 +48,11 @@ test("parses a fenced Spotify activity decision", () => {
   });
 });
 
-test("model attempts consume budget while preflight failures do not", () => {
+test("successful model responses consume budget while failed requests do not", () => {
   const requestError = new Error("Solo 模型请求失败 HTTP 503");
   requestError.attemptedModels = ["primary", "backup"];
   assert.equal(classifyActivityFailure(requestError), "model_request");
-  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "model_request" }, 2), true);
+  assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "model_request" }, 0), false);
 
   const outputError = new Error("Activity 模型没有返回可识别的动作标签");
   outputError.activityStage = "model_output";
@@ -62,6 +63,12 @@ test("model attempts consume budget while preflight failures do not", () => {
   preflightError.activityStage = "game_preflight";
   assert.equal(classifyActivityFailure(preflightError), "game_preflight");
   assert.equal(shouldChargeActivityBudget({ status: "failed", failureKind: "game_preflight" }, 0), false);
+});
+
+test("detects a repeated Ombre letter despite punctuation and whitespace changes", () => {
+  const recent = "标题：凌晨的信\n正文：我想把今天安静地放在这里，等明天再回头看。";
+  assert.equal(isDuplicateLetter("我想把今天安静地放在这里 等明天再回头看", recent), true);
+  assert.equal(isDuplicateLetter("这是完全不同的一封信，它谈的是另一件值得留下来的事情。", recent), false);
 });
 
 test("completed decisions and tool failures still consume a decision slot", () => {
@@ -171,6 +178,7 @@ test("parses a multiline tagged letter in one model request", async () => {
 test("records the attempted model chain when primary and backup channels fail", async () => {
   const requestedModels = [];
   const attemptedModels = [];
+  const successfulResponses = [];
   const fetchImpl = async (_url, init) => {
     const body = JSON.parse(init.body);
     requestedModels.push(body.model);
@@ -183,6 +191,7 @@ test("records the attempted model chain when primary and backup channels fail", 
       backupModel: "backup",
       enabledActions: "spotify",
       onModelAttempt: ({ model }) => attemptedModels.push(model),
+      onModelResponse: ({ model }) => successfulResponses.push(model),
       fetchImpl
     }),
     error => {
@@ -193,6 +202,7 @@ test("records the attempted model chain when primary and backup channels fail", 
   );
   assert.deepEqual(requestedModels, ["primary", "backup"]);
   assert.deepEqual(attemptedModels, ["primary", "backup"]);
+  assert.deepEqual(successfulResponses, []);
 });
 
 test("searches and adds one track without exposing playback tools", async () => {
@@ -346,6 +356,36 @@ test("writes an unlocked AI-authored Ombre letter", async () => {
     lock_type: "none",
     user_name: "Lincy"
   });
+});
+
+test("skips an Ombre letter whose content already exists in recent letters", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const content = "我想把今天安静地放在这里，等明天再回头看。";
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url.includes("model.test")) {
+      return reply({ choices: [{ message: { content: JSON.stringify({ action: "ombre_letter_write", title: "同一封信", content, reason: "想写信" }) } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "feel" }, { name: "I" }, { name: "letter_read" }, { name: "letter_write" }
+    ] } });
+    const text = body.params?.name === "letter_read" ? `最近信件正文：${content}` : "ok";
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text }] } });
+  };
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    enabledActions: "ombre",
+    ombreUrl: "https://ombre.test/mcp",
+    fetchImpl
+  });
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "recent_duplicate_letter");
+  assert.equal(calls.some(call => call.body.params?.name === "letter_write"), false);
 });
 
 test("reads AISay public context before sending one forum message", async () => {

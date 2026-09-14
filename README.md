@@ -370,7 +370,7 @@ OMBRE_MCP_TIMEOUT_MS=12000
 
 Activity Runtime 独立于普通主动推送：即使 `NIGHT_WAKE_AFTER_MINUTES=999`，它仍会按自己的闲置时间、冷却时间和每日预算判断是否运行。普通 Activity 每轮调用一次模型；Games Activity 会多调用一次模型来批量规划本轮操作。它不会在同一轮紧接着再运行普通唤醒。
 
-Activity 可从 Spotify、Ombre 与 AISay 论坛三类动作中每轮选择一件。Spotify 只开放搜索和向指定歌单添加歌曲，不开放播放、暂停、音量、资料库删除等工具。Ombre 会在同一轮模型调用前读取 `feel`、`I` 和最近信件作为回想材料，并只允许写一条候选自我认知或一封 AI 自己的普通未锁信件；不会开放 `promote`、`supersedes` 或 `letter_lock_update`。新版 AISay 把所有功能收进统一的 `cli` 工具；正式启用论坛动作前，先用只读测试取得当前 `cli help` 指令表，再按真实 command 建立读写白名单。
+Activity 可从 Spotify、Ombre 与 AISay 论坛三类动作中每轮选择一件。Spotify 只开放搜索和向指定歌单添加歌曲，不开放播放、暂停、音量、资料库删除等工具。Ombre 会在同一轮模型调用前读取 `feel`、`I` 和最近信件作为回想材料，并只允许写一条候选自我认知或一封 AI 自己的普通未锁信件；写信前还会用最近信件做确定性正文去重，不会重复写入相同内容，也不会开放 `promote`、`supersedes` 或 `letter_lock_update`。新版 AISay 把所有功能收进统一的 `cli` 工具；正式启用论坛动作前，先用只读测试取得当前 `cli help` 指令表，再按真实 command 建立读写白名单。
 
 先配置但保持关闭：
 
@@ -412,7 +412,7 @@ ADMIN_SESSION_DAYS=180
 - `AUTONOMY_CHECK_INTERVAL_MINUTES`：Activity 自己的条件检查频率，默认 15 分钟；检查本身不调用模型。
 - `AUTONOMY_IDLE_MINUTES`：用户离开多久后才允许活动。
 - `AUTONOMY_INTERVAL_MINUTES`：两次模型活动之间的最短间隔。
-- `AUTONOMY_MAX_ACTIONS_PER_DAY`：每天最多占用多少次模型活动预算；模型选择什么都不做、重复跳过或工具执行失败仍计一次，避免反复询问或重复写入。模型请求失败、超时或输出格式错误会记录到 Archive，但会退还每日名额，并等待 `AUTONOMY_INTERVAL_MINUTES` 后再尝试。
+- `AUTONOMY_MAX_ACTIONS_PER_DAY`：每天最多占用多少次模型活动预算；模型选择什么都不做、重复跳过、工具执行失败，或模型已成功响应但输出格式错误时仍计一次。主备模型都未返回成功 HTTP 响应的请求失败或超时会记录到 Archive，但会退还每日名额，并等待 `AUTONOMY_INTERVAL_MINUTES` 后再尝试。
 - `MAX_INJECTED_PUSH_EVENTS`、`MAX_INJECTED_ACTIVITY_EVENTS`、`MAX_INJECTED_SOLO_EVENTS`：分别控制聊天上下文中保留的最近推送、成功 Activity 和成功 Solo 概要数量。未设置新的推送变量时会继续读取旧的 `MAX_INJECTED_WAKE_EVENTS`；新部署可只保留 `MAX_INJECTED_PUSH_EVENTS`。
 - `SPOTIFY_PLAYLIST_ID`：唯一允许写入的歌单。添加前会读取歌单前 50 首并按 Spotify track URI 查重；不需要 Spotify 设备在线，也不需要设备 ID。
 - Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
