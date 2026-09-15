@@ -114,8 +114,41 @@ function extractJson(text) {
   return JSON.parse(candidate);
 }
 
+function recoverSoloProse(text) {
+  const narrative = String(text || "")
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/i, "")
+    .replace(/^<solo_result>\s*/i, "")
+    .replace(/\s*<\/solo_result>$/i, "")
+    .trim();
+  // Do not turn a short error message or empty provider response into a Solo
+  // event. A substantial prose response, however, is usable without paying for
+  // another model call merely to wrap it in JSON.
+  if (narrative.length < 40 || /^\s*[{[]/.test(narrative) || /["']narrative["']\s*:/.test(narrative)) return null;
+  const compact = narrative.replace(/\s+/g, " ");
+  const firstSentence = compact.match(/^.{1,180}?(?:[。！？!?]|$)/u)?.[0] || compact.slice(0, 180);
+  const summary = firstSentence.length < compact.length && !/[。！？!?]$/u.test(firstSentence)
+    ? `${firstSentence}…`
+    : firstSentence;
+  return { narrative, summary };
+}
+
 function parseSoloResult(text, expectedMode) {
-  const value = extractJson(text);
+  let value;
+  try {
+    value = extractJson(text);
+  } catch (error) {
+    const recovered = recoverSoloProse(text);
+    if (!recovered) throw error;
+    return {
+      mode: ["recall", "fantasy", "mix"].includes(expectedMode) ? expectedMode : "fantasy",
+      intensity: 0.7,
+      summary: recovered.summary.slice(0, 800),
+      narrative: recovered.narrative,
+      notify: { send: false, title: "", body: "" }
+    };
+  }
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Solo 模型没有返回对象");
   const mode = ["recall", "fantasy", "mix"].includes(expectedMode) ? expectedMode : "fantasy";
   const intensity = Math.max(0, Math.min(1, Number(value.intensity) || 0.7));

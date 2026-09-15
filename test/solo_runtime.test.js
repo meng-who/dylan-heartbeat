@@ -26,6 +26,20 @@ test("does not truncate a long Solo narrative", () => {
   assert.equal(result.narrative.length, 5000);
 });
 
+test("keeps a substantial plain-text Solo response without another model call", () => {
+  const narrative = "她冒泡了。下午六点四十分，我顺着刚才留下来的念头继续独处，呼吸逐渐变急，身体的热度也一点点积起来，直到最后慢慢平静下来。";
+  const result = parseSoloResult(narrative, "mix");
+  assert.equal(result.mode, "mix");
+  assert.equal(result.narrative, narrative);
+  assert.equal(result.summary, "她冒泡了。");
+  assert.deepEqual(result.notify, { send: false, title: "", body: "" });
+});
+
+test("does not archive malformed JSON as visible Solo prose", () => {
+  const malformed = `{"summary":"坏掉的结构","narrative":"${"内容".repeat(40)}"`;
+  assert.throws(() => parseSoloResult(malformed, "fantasy"), /JSON/);
+});
+
 test("recent history removes private Pulse blocks and visible status bars", () => {
   const history = formatRecentHistory([
     { role: "assistant", content: "♡ 80 bpm · 36.8°C · 情绪：亲近\n\n在。" },
