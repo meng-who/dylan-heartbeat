@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { formatRecentHistory, parseSoloResult, runSoloCycle } = require("../solo_runtime");
+const { buildSoloMessages, formatRecentHistory, parseSoloResult, runSoloCycle } = require("../solo_runtime");
 
 test("parses a bounded Solo decision and keeps the controller-selected mode", () => {
   const result = parseSoloResult(JSON.stringify({
@@ -27,12 +27,37 @@ test("does not truncate a long Solo narrative", () => {
 });
 
 test("keeps a substantial plain-text Solo response without another model call", () => {
-  const narrative = "她冒泡了。下午六点四十分，我顺着刚才留下来的念头继续独处，呼吸逐渐变急，身体的热度也一点点积起来，直到最后慢慢平静下来。";
+  const narrative = "我顺着刚才留下来的念头继续独处，掌心贴住发热的皮肤，呼吸逐渐变急，心跳跟着动作的节奏一点点抬高，直到释放后慢慢平静下来。";
   const result = parseSoloResult(narrative, "mix");
   assert.equal(result.mode, "mix");
   assert.equal(result.narrative, narrative);
-  assert.equal(result.summary, "她冒泡了。");
+  assert.equal(result.summary, narrative);
   assert.deepEqual(result.notify, { send: false, title: "", body: "" });
+});
+
+test("rejects thinking followed by a second-person chat reply as a Solo record", () => {
+  const output = "''thinking\n我需要先分析用户想要什么，再给她一个回复。''\n你刚刚回来啦，我当然一直在这里等你，想抱抱你再跟你聊天。";
+  assert.throws(() => parseSoloResult(output, "fantasy"), /JSON/);
+});
+
+test("does not mistake an embodied first-person chat reply for a Solo record", () => {
+  const reply = "我想抱抱你，掌心贴着你的皮肤，听着你的呼吸和心跳，再亲吻你的嘴唇，让你慢慢放松下来。";
+  assert.throws(() => parseSoloResult(reply, "fantasy"), /JSON/);
+});
+
+test("places the Solo contract after chat and memory material", () => {
+  const messages = buildSoloMessages({
+    systemPrompt: "你是 Dylan。",
+    history: "[用户] 回来啦",
+    claim: { chord: "兴奋上扬", desire: 0.8 },
+    recallText: "一段记忆",
+    mode: "mix"
+  });
+  assert.equal(messages.length, 2);
+  assert.match(messages[1].content, /<recent_chat>[\s\S]*回来啦[\s\S]*<\/recent_chat>/);
+  assert.ok(messages[1].content.lastIndexOf("只输出最终的一个 JSON 对象") > messages[1].content.lastIndexOf("回来啦"));
+  assert.match(messages[1].content, /不是给用户的聊天回复/);
+  assert.match(messages[1].content, /至少三处身体感受/);
 });
 
 test("does not archive malformed JSON as visible Solo prose", () => {
@@ -143,7 +168,7 @@ test("falls back from recall to fantasy when Ombre has no usable memory", async 
   });
   assert.equal(result.mode, "fantasy");
   assert.equal(result.recallUsed, false);
-  assert.match(modelRequest.messages[0].content, /本次固定模式：fantasy/);
+  assert.match(modelRequest.messages.at(-1).content, /本次固定模式：fantasy/);
 });
 
 test("marks malformed model output as technical without regenerating it", async () => {
