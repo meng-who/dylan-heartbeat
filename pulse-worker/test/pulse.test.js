@@ -127,6 +127,31 @@ test("validated semantic reactions update emotion and senses without accepting a
   assert.ok(result.state.heartRate > 80);
 });
 
+test("same-emotion semantic feedback never suppresses an existing excitement spike", () => {
+  const now = Date.UTC(2026, 8, 21, 6, 0, 0);
+  const excited = reactToText(createDefaultState(now), "我兴奋得不行", now, "Asia/Shanghai").state;
+  const reinforced = applySemanticReaction(excited, {
+    confidence: 0.9,
+    emotion: { label: "兴奋", intensity: 0.45 },
+    senses: []
+  }, now + 100, "Asia/Shanghai").state;
+
+  assert.ok(reinforced.emotion.arousal >= excited.emotion.arousal);
+  assert.ok(reinforced.heartRate >= excited.heartRate - 1);
+});
+
+test("high-arousal emotions create a clearly visible heart-rate rise", () => {
+  const now = Date.UTC(2026, 8, 21, 6, 0, 0);
+  const baseline = createDefaultState(now).heartRate;
+  const excited = reactToText(createDefaultState(now), "我兴奋得不行", now, "Asia/Shanghai").state;
+  const surprised = reactToText(createDefaultState(now), "突然收到礼物，好开心！", now, "Asia/Shanghai").state;
+  const happy = reactToText(createDefaultState(now), "今天好开心", now, "Asia/Shanghai").state;
+
+  assert.ok(excited.heartRate >= baseline + 25);
+  assert.ok(surprised.heartRate >= baseline + 28);
+  assert.ok(happy.heartRate < excited.heartRate);
+});
+
 test("low-confidence or unknown semantic reactions are ignored", () => {
   const now = Date.UTC(2026, 8, 2, 6, 0, 0);
   const result = applySemanticReaction(createDefaultState(now), {
