@@ -166,6 +166,21 @@ test("prepares and finalizes Pulse through separate safe endpoints", async () =>
   assert.equal(calls[2].body.text, "抱抱");
 });
 
+test("reports a Pulse timeout with the endpoint and configured duration", async () => {
+  const fetchImpl = (_url, init) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+  });
+  await assert.rejects(
+    fetchPulsePreparation({
+      baseUrl: "https://pulse.example.com",
+      clientKey: "k",
+      timeoutMs: 5,
+      fetchImpl
+    }),
+    /Pulse \/api\/prepare timed out after 5ms/
+  );
+});
+
 test("decorates JSON with the post-reaction status and strips metadata", async () => {
   let received;
   const hidden = '<pulse_reaction>{"confidence":0.9,"emotion":{"label":"亲近","intensity":0.8},"senses":[]}</pulse_reaction>\n在。';

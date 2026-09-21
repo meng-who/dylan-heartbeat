@@ -151,6 +151,7 @@ test("prepares state and applies a validated semantic reaction", async () => {
   }), { ...baseEnv, DB: db });
   assert.equal(prepared.status, 200);
   assert.match((await prepared.json()).privateState, /<pulse_state>/);
+  assert.equal(db.state.row, null, "prepare should not perform a D1 write");
 
   const applied = await worker.fetch(new Request("https://pulse.example.com/api/apply", {
     method: "POST",

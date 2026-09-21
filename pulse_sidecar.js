@@ -124,6 +124,11 @@ async function pulseRequest({ baseUrl, clientKey, pathname, body = {}, timeoutMs
       throw new Error("Pulse response is incomplete");
     }
     return payload;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Pulse ${pathname} timed out after ${timeoutMs}ms`);
+    }
+    throw error;
   } finally {
     clearTimeout(timer);
   }

@@ -296,7 +296,6 @@ async function handlePrepareApi(request, env) {
   const now = Date.now();
   const stored = await loadState(env.DB, profileId(env), now);
   const state = decayState(stored, now, env.TIME_ZONE || "Asia/Shanghai");
-  await saveState(env.DB, profileId(env), state, []);
   return json(pulsePayload(state));
 }
 

@@ -74,6 +74,13 @@ function readBooleanEnv(key, fallback = false) {
   return ["1", "true", "yes", "on"].includes(raw);
 }
 
+function pulseTimeoutMs() {
+  const configured = Number(process.env.PULSE_TIMEOUT_MS);
+  return Number.isFinite(configured) && configured > 0
+    ? Math.max(12000, configured)
+    : 12000;
+}
+
 function configuredModelName() {
   // 批注 2026-07-15：/v1/models 要暴露部署者实际配置的模型名；
   // 不能继续硬编码示例模型，否则 Kelivo 模型选择会和真实上游不一致。
@@ -840,7 +847,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       pulseContext = await fetchPulsePreparation({
         baseUrl: process.env.PULSE_WORKER_URL,
         clientKey: process.env.PULSE_CLIENT_KEY,
-        timeoutMs: Number(process.env.PULSE_TIMEOUT_MS) || 5000
+        timeoutMs: pulseTimeoutMs()
       });
       if (pulseContext) {
         injectPulseState(llmMessages, pulseContext.privateState);
@@ -946,7 +953,7 @@ app.post("/v1/chat/completions", async (req, reply) => {
       clientKey: process.env.PULSE_CLIENT_KEY,
       reaction,
       fallbackText: latestUserText,
-      timeoutMs: Number(process.env.PULSE_TIMEOUT_MS) || 5000
+      timeoutMs: pulseTimeoutMs()
     });
 
     const primaryModel = String(body?.model || "").trim();
