@@ -26,6 +26,25 @@ test("does not truncate a long Solo narrative", () => {
   assert.equal(result.narrative.length, 5000);
 });
 
+test("parses tagged Solo prose containing quotes and line breaks without JSON escaping", () => {
+  const output = `<solo_result>
+<solo_mode>fantasy</solo_mode>
+<solo_intensity>0.86</solo_intensity>
+<solo_summary>独处时进入了一段具体幻想</solo_summary>
+<solo_narrative>我独自躺在床上，听见自己说“再慢一点”。
+掌心贴着发热的皮肤，呼吸和心跳随着动作的节奏逐渐加快，释放后才慢慢平静。</solo_narrative>
+<solo_notify_send>false</solo_notify_send>
+<solo_notify_title></solo_notify_title>
+<solo_notify_body></solo_notify_body>
+</solo_result>`;
+  const result = parseSoloResult(output, "fantasy");
+  assert.equal(result.mode, "fantasy");
+  assert.equal(result.intensity, 0.86);
+  assert.match(result.narrative, /“再慢一点”/);
+  assert.match(result.narrative, /\n掌心贴着/);
+  assert.equal(result.notify.send, false);
+});
+
 test("keeps a substantial plain-text Solo response without another model call", () => {
   const narrative = "我顺着刚才留下来的念头继续独处，掌心贴住发热的皮肤，呼吸逐渐变急，心跳跟着动作的节奏一点点抬高，直到释放后慢慢平静下来。";
   const result = parseSoloResult(narrative, "mix");
@@ -55,9 +74,10 @@ test("places the Solo contract after chat and memory material", () => {
   });
   assert.equal(messages.length, 2);
   assert.match(messages[1].content, /<recent_chat>[\s\S]*回来啦[\s\S]*<\/recent_chat>/);
-  assert.ok(messages[1].content.lastIndexOf("只输出最终的一个 JSON 对象") > messages[1].content.lastIndexOf("回来啦"));
+  assert.ok(messages[1].content.lastIndexOf("只输出下面这一份标签结果") > messages[1].content.lastIndexOf("回来啦"));
   assert.match(messages[1].content, /不是给用户的聊天回复/);
   assert.match(messages[1].content, /至少三处身体感受/);
+  assert.match(messages[1].content, /<solo_narrative>/);
 });
 
 test("does not archive malformed JSON as visible Solo prose", () => {
