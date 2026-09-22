@@ -17,28 +17,84 @@ function parseEnabledActions(value) {
   return [...new Set(actions)];
 }
 
+function normalizeActivityOutput(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^```(?:json|xml)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/[＜]/g, "<")
+    .replace(/[＞]/g, ">")
+    .replace(/\\(?=[<>/_])/g, "");
+}
+
+function activityOutputPreview(value) {
+  const compact = normalizeActivityOutput(value).replace(/\s+/g, " ").trim();
+  return compact.slice(0, 300) + (compact.length > 300 ? "…" : "");
+}
+
+function readActivityTag(text, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return text.match(new RegExp(`<\\s*${escaped}\\b[^>]*>\\s*([\\s\\S]*?)\\s*<\\s*\\/\\s*${escaped}\\s*>`, "i"))?.[1] || "";
+}
+
+function readActivityLine(text, names) {
+  const escaped = names.map(name => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  return text.match(new RegExp(`(?:^|\\n)\\s*(?:${escaped})\\s*[:=：]\\s*[\"'\\\`]?([^\\n\"'\\\`]+)`, "im"))?.[1]?.trim() || "";
+}
+
+function normalizeActivityAction(value) {
+  const action = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const aliases = {
+    no_action: "none",
+    skip: "none",
+    skipped: "none",
+    无: "none",
+    不行动: "none",
+    spotify: "spotify_add",
+    ombre_i: "ombre_i_write",
+    ombre_letter: "ombre_letter_write",
+    forum: "forum_send",
+    games: "games_play",
+    game: "games_play"
+  };
+  return aliases[action] || action;
+}
+
 function parseActivityDecision(value) {
-  const text = String(value || "").trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+  const text = normalizeActivityOutput(value);
   const jsonMatch = text.match(/\{[\s\S]*\}/);
-  let parsed;
+  let parsed = null;
   if (jsonMatch) {
-    parsed = JSON.parse(jsonMatch[0]);
-  } else {
-    const readTag = name => text.match(new RegExp(`<${name}>\\s*([\\s\\S]*?)\\s*</${name}>`, "i"))?.[1] || "";
-    parsed = {
-      action: readTag("action"),
-      query: readTag("query"),
-      content: readTag("content"),
-      title: readTag("title"),
-      aspect: readTag("aspect"),
-      room_id: readTag("room_id"),
-      reply_to_message_id: readTag("reply_to_message_id"),
-      game: readTag("game"),
-      reason: readTag("reason")
-    };
-    if (!parsed.action) throw new Error("Activity 模型没有返回可识别的动作标签");
+    try {
+      parsed = JSON.parse(jsonMatch[0]);
+    } catch {}
   }
-  const action = String(parsed.action || "none").trim().toLowerCase();
+  if (!parsed) {
+    const readField = (name, aliases = []) => readActivityTag(text, name) || readActivityLine(text, [name, ...aliases]);
+    parsed = {
+      action: readField("action", ["动作", "选择"]),
+      query: readField("query", ["搜索", "搜索词"]),
+      content: readActivityTag(text, "content") || readActivityLine(text, ["content", "内容"]),
+      title: readField("title", ["标题"]),
+      aspect: readField("aspect", ["维度"]),
+      room_id: readField("room_id", ["roomId", "房间"]),
+      reply_to_message_id: readField("reply_to_message_id", ["replyToMessageId"]),
+      game: readField("game", ["游戏"]),
+      reason: readField("reason", ["原因"])
+    };
+    if (!parsed.action && /\[(?:NO[_ ]?ACTION|SKIP)\]|(?:决定|选择)?(?:不行动|什么都不做|保持安静)/i.test(text)) {
+      parsed.action = "none";
+    }
+    if (!parsed.action) {
+      const preview = activityOutputPreview(value);
+      throw new Error(`Activity 模型没有返回可识别的动作标签${preview ? `；输出开头：${preview}` : "（输出为空）"}`);
+    }
+  }
+  const action = normalizeActivityAction(parsed.action || "none");
   if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_send", "games_play"].includes(action)) {
     throw new Error(`Activity 不支持的动作：${action}`);
   }

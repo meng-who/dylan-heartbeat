@@ -137,6 +137,24 @@ test("parses a forum activity decision", () => {
   });
 });
 
+test("accepts escaped, attributed and line-based activity formats", () => {
+  assert.equal(parseActivityDecision(
+    '\\<activity\\>\\<action source="choice"\\>games\\<\\/action\\>\\<game\\>fishing\\<\\/game\\>\\<reason\\>想去看看\\<\\/reason\\>\\<\\/activity\\>'
+  ).action, "games_play");
+  assert.equal(parseActivityDecision(
+    "&lt;activity&gt;&lt;action&gt;none&lt;/action&gt;&lt;reason&gt;现在不想做事&lt;/reason&gt;&lt;/activity&gt;"
+  ).action, "none");
+  assert.equal(parseActivityDecision("ACTION: skip\nreason: 想安静一会儿").action, "none");
+  assert.equal(parseActivityDecision("我决定什么都不做，保持安静。").action, "none");
+});
+
+test("includes a bounded model-output preview for unknown activity formats", () => {
+  assert.throws(
+    () => parseActivityDecision("我想再考虑一下，但没有按约定给出结构。"),
+    /输出开头：我想再考虑一下/
+  );
+});
+
 test("parses a games activity choice and a bounded batch plan", () => {
   assert.equal(parseActivityDecision(
     "<activity><action>games_play</action><game>fishing</game><reason>想去钓鱼</reason></activity>"
