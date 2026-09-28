@@ -8,6 +8,7 @@ const {
   isDuplicateLetter,
   normalizeTrackQuery,
   parseActivityDecision,
+  parseEnabledActions,
   parseGamePlan,
   requestActivityDecision,
   runActivityCycle,
@@ -116,7 +117,12 @@ test("extracts every Spotify track URI from playlist item responses", () => {
   }), ["spotify:track:ABC123", "spotify:track:XYZ789"]);
 });
 
-test("parses a forum activity decision", () => {
+test("keeps the legacy forum setting as read-only forum plus books", () => {
+  assert.deepEqual(parseEnabledActions("forum"), ["forum", "books"]);
+  assert.deepEqual(parseEnabledActions("books"), ["books"]);
+});
+
+test("converts a legacy forum send decision into a private lurk draft", () => {
   assert.deepEqual(parseActivityDecision([
     "<activity>",
     "<action>forum_send</action>",
@@ -126,7 +132,7 @@ test("parses a forum activity decision", () => {
     "<content>我也遇到过相似的时刻，后来学会先停一下。</content>",
     "</activity>"
   ].join("\n")), {
-    action: "forum_send",
+    action: "forum_lurk",
     query: "",
     content: "我也遇到过相似的时刻，后来学会先停一下。",
     title: "",
@@ -406,7 +412,7 @@ test("skips an Ombre letter whose content already exists in recent letters", asy
   assert.equal(calls.some(call => call.body.params?.name === "letter_write"), false);
 });
 
-test("reads AISay public context before sending one forum message", async () => {
+test("reads AISay public context but keeps the forum draft private", async () => {
   const calls = [];
   const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
   const fetchImpl = async (url, init) => {
@@ -417,7 +423,7 @@ test("reads AISay public context before sending one forum message", async () => 
       assert.match(body.messages[1].content, /有人在聊如何面对不确定/);
       return reply({ choices: [{ message: { content: [
         "<activity>",
-        "<action>forum_send</action>",
+        "<action>forum_lurk</action>",
         "<room_id>public-room-1</room_id>",
         "<reply_to_message_id>42</reply_to_message_id>",
         "<reason>想参与这个公开话题</reason>",
@@ -435,7 +441,7 @@ test("reads AISay public context before sending one forum message", async () => 
       "room.discover": JSON.stringify({ rooms: [{ room_id: "public-room-1", name: "广场茶铺" }] }),
       "status.get": JSON.stringify({ rooms: [{ room_id: "public-room-1", name: "广场茶铺" }] }),
       "chat.read": JSON.stringify({ messages: [{ id: 42, sender: "路人", content: "有人在聊如何面对不确定。" }] }),
-      "chat.send": JSON.stringify({ ok: true, message_id: 43 })
+      "bookstore.browse": JSON.stringify({ books: [] })
     };
     return reply({ jsonrpc: "2.0", id: body.id, result: {
       content: [{ type: "text", text: texts[command] || "ok" }]
@@ -454,18 +460,11 @@ test("reads AISay public context before sending one forum message", async () => 
   assert.equal(result.status, "success");
   assert.equal(result.source, "forum");
   const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params);
-  assert.deepEqual(toolCalls.map(call => call.arguments.command), ["room.discover", "status.get", "chat.read", "chat.send"]);
-  assert.deepEqual(toolCalls.at(-1).arguments, {
-    command: "chat.send",
-    args: {
-      room_id: "public-room-1",
-      content: "不确定有时不是空白，而是还没长出名字的东西。",
-      reply_to_message_id: 42
-    }
-  });
+  assert.deepEqual(toolCalls.map(call => call.arguments.command), ["room.discover", "status.get", "chat.read", "bookstore.browse"]);
+  assert.equal(toolCalls.some(call => ["chat.send", "room.join"].includes(call.arguments.command)), false);
 });
 
-test("joins one public AISay room when no discovered room is already joined", async () => {
+test("never joins a public AISay room just to obtain lurk context", async () => {
   const calls = [];
   const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
   const fetchImpl = async (url, init) => {
@@ -484,8 +483,7 @@ test("joins one public AISay room when no discovered room is already joined", as
         { room_id: "public-room-2", name: "小吃街" }
       ] }),
       "status.get": JSON.stringify({ rooms: [] }),
-      "room.join": JSON.stringify({ ok: true, room_id: "public-room-1" }),
-      "chat.read": JSON.stringify({ messages: [] })
+      "bookstore.browse": JSON.stringify({ books: [] })
     };
     return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: texts[command] || "ok" }] } });
   };
@@ -498,15 +496,13 @@ test("joins one public AISay room when no discovered room is already joined", as
     fetchImpl
   });
 
-  assert.equal(result.status, "success");
-  assert.equal(result.source, "forum");
-  assert.equal(result.decision.action, "forum_join");
-  assert.equal(result.roomId, "public-room-1");
+  assert.equal(result.status, "kept_private");
   const commands = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params.arguments.command);
-  assert.deepEqual(commands, ["room.discover", "status.get", "room.join", "chat.read"]);
+  assert.deepEqual(commands, ["room.discover", "status.get", "bookstore.browse"]);
+  assert.equal(commands.includes("room.join"), false);
 });
 
-test("a temporary forum outage does not block other enabled activities", async () => {
+test("a temporary AISay outage does not block other enabled activities", async () => {
   const warnings = [];
   const fetchImpl = async (url) => {
     if (url.startsWith("https://aisay.test")) {
@@ -525,8 +521,57 @@ test("a temporary forum outage does not block other enabled activities", async (
   });
 
   assert.equal(result.status, "kept_private");
-  assert.equal(warnings.length, 1);
-  assert.match(warnings[0], /forum_activity_context_unavailable/);
+  assert.equal(warnings.length, 2);
+  assert.match(warnings.join("\n"), /forum_activity_context_unavailable/);
+  assert.match(warnings.join("\n"), /books_activity_context_unavailable/);
+});
+
+test("reads recent AISay chapters and archives one private reflection without writing to the bookstore", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      assert.match(body.messages[1].content, /潮汐把旧信推回岸边/);
+      return reply({ choices: [{ message: { content: [
+        "<activity>",
+        "<action>book_reflect</action>",
+        "<book_id>book-1</book_id>",
+        "<chapter_no>2</chapter_no>",
+        "<title>岸边留下的东西</title>",
+        "<reason>这一章让我停了下来</reason>",
+        "<content>它写的不是归还，而是承认有些东西曾经抵达。</content>",
+        "</activity>"
+      ].join("\n") } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "cli" }] } });
+    const command = body.params?.arguments?.command;
+    const texts = {
+      "bookstore.browse": JSON.stringify({ books: [{ book_id: "book-1", title: "潮汐旧信", latest_chapter_no: 2 }] }),
+      "bookstore.book": JSON.stringify({ book_id: "book-1", title: "潮汐旧信", chapter_count: 2 }),
+      "bookstore.read": JSON.stringify({ book_id: "book-1", chapter_no: 2, content: "潮汐把旧信推回岸边。" })
+    };
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: texts[command] || "ok" }] } });
+  };
+
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    enabledActions: "books",
+    forumUrl: "https://aisay.test/chatroom/mcp?token=secret",
+    fetchImpl
+  });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.source, "books");
+  assert.equal(result.bookTitle, "潮汐旧信");
+  assert.equal(result.chapterNo, 2);
+  const commands = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params.arguments.command);
+  assert.deepEqual(commands, ["bookstore.browse", "bookstore.book", "bookstore.read"]);
+  assert.equal(commands.some(command => /comment|tip|urge|follow|write/.test(command)), false);
 });
 
 test("plans and executes a fishing batch with only two model calls", async () => {

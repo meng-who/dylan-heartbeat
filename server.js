@@ -1414,9 +1414,17 @@ function archivePageHtml() {
         : "";
       const candidateMatchesFinal = String(item.candidate || "").trim() === finalText.trim();
       if (item.candidate && !candidateMatchesFinal) {
-        const candidateText = item.kind === "activity"
-          ? (item.status === "success" ? "已写入内容：" : "拟写内容（未执行）：") + item.candidate
-          : item.candidate;
+        let candidateText = item.candidate;
+        if (item.kind === "activity") {
+          const prefix = item.status !== "success"
+            ? "拟写内容（未执行）："
+            : item.source === "books"
+              ? "私人读后感："
+              : item.action === "forum_lurk"
+                ? "私人感受／待确认回复草稿："
+                : "已写入内容：";
+          candidateText = prefix + item.candidate;
+        }
         appendArchiveText(article, "candidate", candidateText, "查看完整内容");
       }
       if (hasFinal) {
@@ -1439,6 +1447,11 @@ function archivePageHtml() {
       if (item.source) details.push("来源：" + item.source);
       if (item.action) details.push("动作：" + item.action);
       if (item.track_uri) details.push("歌曲：" + item.track_uri);
+      if (item.book_title || item.book_id) {
+        details.push("读书：" + (item.book_title || item.book_id) + (item.chapter_no ? " · 第 " + item.chapter_no + " 章" : ""));
+      }
+      if (item.room_id) details.push("潜水房间：" + item.room_id);
+      if (item.reply_to_message_id) details.push("留意消息：" + item.reply_to_message_id);
       if (item.game_name) details.push("游戏：" + item.game_name);
       if (item.game_outcome) details.push("结果：" + item.game_outcome);
       if (item.kind === "activity") {

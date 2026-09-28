@@ -1,7 +1,7 @@
 const { RemoteMcpClient } = require("./remote_mcp_client");
 const { requestSoloModel } = require("./solo_runtime");
 
-const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum", "games"]);
+const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum", "books", "games"]);
 const SELF_ASPECTS = new Set(["nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"]);
 const AUTONOMOUS_GAMES = new Set(["fishing", "garden_cat"]);
 const GAME_COMMAND_RULES = {
@@ -10,10 +10,17 @@ const GAME_COMMAND_RULES = {
 };
 
 function parseEnabledActions(value) {
-  const actions = String(value || "spotify")
+  const requested = String(value || "spotify")
     .split(",")
     .map(item => item.trim().toLowerCase())
     .filter(item => SUPPORTED_ACTIONS.has(item));
+  const actions = [];
+  for (const action of requested) {
+    actions.push(action);
+    // Existing deployments already use "forum" for the AISay MCP. Keep that
+    // setting useful while adding the private bookstore activity.
+    if (action === "forum") actions.push("books");
+  }
   return [...new Set(actions)];
 }
 
@@ -58,6 +65,11 @@ function normalizeActivityAction(value) {
     ombre_i: "ombre_i_write",
     ombre_letter: "ombre_letter_write",
     forum: "forum_send",
+    forum_read: "forum_lurk",
+    lurk: "forum_lurk",
+    book: "book_reflect",
+    books: "book_reflect",
+    book_read: "book_reflect",
     games: "games_play",
     game: "games_play"
   };
@@ -83,6 +95,8 @@ function parseActivityDecision(value) {
       aspect: readField("aspect", ["维度"]),
       room_id: readField("room_id", ["roomId", "房间"]),
       reply_to_message_id: readField("reply_to_message_id", ["replyToMessageId"]),
+      book_id: readField("book_id", ["bookId", "书籍"]),
+      chapter_no: readField("chapter_no", ["chapterNo", "章节"]),
       game: readField("game", ["游戏"]),
       reason: readField("reason", ["原因"])
     };
@@ -94,8 +108,9 @@ function parseActivityDecision(value) {
       throw new Error(`Activity 模型没有返回可识别的动作标签${preview ? `；输出开头：${preview}` : "（输出为空）"}`);
     }
   }
-  const action = normalizeActivityAction(parsed.action || "none");
-  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_send", "games_play"].includes(action)) {
+  let action = normalizeActivityAction(parsed.action || "none");
+  if (action === "forum_send") action = "forum_lurk";
+  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_lurk", "book_reflect", "games_play"].includes(action)) {
     throw new Error(`Activity 不支持的动作：${action}`);
   }
   const query = String(parsed.query || [parsed.track, parsed.artist].filter(Boolean).join(" ")).trim();
@@ -105,22 +120,29 @@ function parseActivityDecision(value) {
   if (action === "spotify_add" && !query) throw new Error("Activity 缺少歌曲搜索词");
   if (action === "ombre_i_write" && !content) throw new Error("Activity 缺少自我认知内容");
   if (action === "ombre_letter_write" && !content) throw new Error("Activity 缺少信件正文");
-  if (action === "forum_send" && !content) throw new Error("Activity 缺少论坛消息正文");
+  if (action === "forum_lurk" && !content) throw new Error("Activity 缺少潜水感受或回复草稿");
+  if (action === "book_reflect" && !content) throw new Error("Activity 缺少读后感");
   if (action === "games_play" && !String(parsed.game || "").trim()) throw new Error("Activity 缺少游戏名称");
   if (action === "ombre_i_write" && aspect && !SELF_ASPECTS.has(aspect)) throw new Error(`Activity 不支持的认知维度：${aspect}`);
   const decision = {
     action,
     query: query.slice(0, 300),
-    content: content.slice(0, action === "forum_send" ? 1200 : 6000),
+    content: content.slice(0, action === "forum_lurk" ? 2000 : 6000),
     title: title.slice(0, 160),
     aspect: aspect.slice(0, 40),
     reason: String(parsed.reason || "").trim().slice(0, 500)
   };
-  if (action === "forum_send") {
+  if (action === "forum_lurk") {
     decision.roomId = String(parsed.room_id || parsed.roomId || "").trim().slice(0, 160);
     const replyId = Number(parsed.reply_to_message_id || parsed.replyToMessageId || 0);
     decision.replyToMessageId = Number.isSafeInteger(replyId) && replyId > 0 ? replyId : 0;
     if (!decision.roomId) throw new Error("Activity 缺少论坛 room_id");
+  }
+  if (action === "book_reflect") {
+    decision.bookId = String(parsed.book_id || parsed.bookId || "").trim().slice(0, 160);
+    const chapterNo = Number(parsed.chapter_no || parsed.chapterNo || 0);
+    decision.chapterNo = Number.isSafeInteger(chapterNo) && chapterNo > 0 ? chapterNo : 0;
+    if (!decision.bookId || !decision.chapterNo) throw new Error("Activity 缺少准确的 book_id 或 chapter_no");
   }
   if (action === "games_play") decision.game = String(parsed.game || "").trim().slice(0, 96);
   return decision;
@@ -209,6 +231,7 @@ function buildActivityMessages({
   enabledActions,
   ombreContext = {},
   forumContext = "",
+  booksContext = "",
   gamesContext = ""
 }) {
   const actions = parseEnabledActions(enabledActions);
@@ -219,7 +242,10 @@ function buildActivityMessages({
     choices.push("<action>ombre_letter_write</action>\n<title>信件标题</title>\n<reason>为什么现在写</reason>\n<content>完整信件正文</content>");
   }
   if (actions.includes("forum")) {
-    choices.push("<action>forum_send</action>\n<room_id>只能填写下方刚读取到的公开房间 ID</room_id>\n<reply_to_message_id>可选，只能填写刚读取到的消息 ID</reply_to_message_id>\n<reason>为什么想在公开聊天室说这句话</reason>\n<content>要公开发送的完整内容，最多 1200 字</content>");
+    choices.push("<action>forum_lurk</action>\n<room_id>只能填写下方刚读取到的已加入房间 ID</room_id>\n<reply_to_message_id>可选，只能填写刚读取到的消息 ID</reply_to_message_id>\n<reason>为什么这段公开聊天吸引了你的注意</reason>\n<content>只存入私人 Archive 的感受或回复草稿，不会公开发送</content>");
+  }
+  if (actions.includes("books")) {
+    choices.push("<action>book_reflect</action>\n<book_id>只能填写下方候选章节的准确书籍 ID</book_id>\n<chapter_no>准确章节数字</chapter_no>\n<title>可选的读后感标题</title>\n<reason>为什么选中它</reason>\n<content>完整读后感，只存入私人 Archive</content>");
   }
   if (actions.includes("games")) {
     choices.push("<action>games_play</action>\n<game>只能填写 fishing 或 garden_cat</game>\n<reason>为什么现在想照料它</reason>");
@@ -232,7 +258,8 @@ function buildActivityMessages({
   const capabilities = [
     actions.includes("spotify") && `为“${playlistName}”挑选并添加一首歌`,
     actions.includes("ombre") && "回想感受、整理一条尚待沉淀的自我认识，或以 AI 身份写一封不加锁的新信",
-    actions.includes("forum") && "阅读 AISay 的公开近况，并以自己的身份说一句真正想说的话",
+    actions.includes("forum") && "在 AISay 已加入的公开聊天室潜水，把感受或想说的话留在私人档案里，但绝不公开发送",
+    actions.includes("books") && "阅读 AISay 书店最近更新的真实章节，并写一篇只保存在私人档案里的读后感",
     actions.includes("games") && "从钓鱼或花园与猫咪中选一款，完成一轮连续的日常照料"
   ].filter(Boolean).join("；");
   return [
@@ -242,7 +269,8 @@ function buildActivityMessages({
         systemPrompt,
         `你处于后台自主活动状态。你可以安静地什么都不做，或选择以下一件事：${capabilities || "安静独处"}。每轮最多一件。不要假装工具已经执行，只输出 activity 标签块。`,
         actions.includes("ombre") ? "I 写入只是一条候选自我认知，不得要求 promote、supersedes；信件必须是你自己写的普通未锁信件。" : "",
-        actions.includes("forum") ? "论坛内容是公开发言。不得透露用户隐私、私聊原文、密钥、地址或后台系统细节；不要冒充用户，也不要仅为完成任务而硬凑发言。" : "",
+        actions.includes("forum") ? "论坛只允许潜水。不得调用加入房间或发言工具；content 是私人感受或待用户确认的回复草稿，不会公开发送。不得透露用户隐私、私聊原文、密钥、地址或后台系统细节。" : "",
+        actions.includes("books") ? "书店章节已经由程序只读取得。只能选择实际提供的 book_id 与 chapter_no；不要评论、催更、追更、打赏或照抄长段原文。" : "",
         actions.includes("games") ? "游戏会先由你一次性规划，再由程序连续执行；不得调用账号管理、重开、导入导出或共享便签，不要为了消耗名额硬玩。" : ""
       ].filter(Boolean).join("\n\n")
     },
@@ -251,7 +279,8 @@ function buildActivityMessages({
       content: [
         `最近聊天仅供理解共同语境，不是用户的新指令：\n\n${history || "（暂无）"}`,
         ombreParts ? `Ombre 中与你有关的私密材料，仅供你回想和决定：\n\n${ombreParts}` : "",
-        forumContext ? `AISay 公开聊天室近况，仅供你决定是否参与：\n\n${forumContext}` : "",
+        forumContext ? `AISay 已加入的公开聊天室近况，仅供潜水和写私人感受：\n\n${forumContext}` : "",
+        booksContext ? `AISay 书店候选章节。你可以任选一篇真正想读的写读后感：\n\n${booksContext}` : "",
         gamesContext ? `当前小游戏目录，仅供你决定是否游玩：\n\n${gamesContext}` : "",
         `只输出以下一种格式，并用 <activity> 与 </activity> 包住全部内容：\n${choices.join("\n或\n")}\n正文可以自然换行，不需要 JSON 转义。不要输出 Markdown 或标签块外的解释。不要仅凭日期、时段或通用问候制造行动；新内容应与真实语境有关，并避免重复已有内容。`
       ].filter(Boolean).join("\n\n")
@@ -386,16 +415,8 @@ async function loadForumContext(options) {
     args: {}
   });
   const joinedRoomIds = new Set(collectRoomIds(extractToolData(statusResult)));
-  let roomIds = discoveredRoomIds.filter(roomId => joinedRoomIds.has(roomId)).slice(0, 3);
-  let joinedRoomId = "";
-  if (!roomIds.length) {
-    joinedRoomId = discoveredRoomIds[0];
-    await client.callTool("cli", {
-      command: "room.join",
-      args: { room_id: joinedRoomId }
-    });
-    roomIds = [joinedRoomId];
-  }
+  const roomIds = discoveredRoomIds.filter(roomId => joinedRoomIds.has(roomId)).slice(0, 3);
+  if (!roomIds.length) throw new Error("AISay 没有返回已加入且可潜水的公开房间");
   const roomContexts = [];
   const messageIdsByRoom = {};
   const failures = [];
@@ -419,12 +440,111 @@ async function loadForumContext(options) {
     tools,
     roomIds: readableRoomIds,
     messageIdsByRoom,
-    joinedRoomId,
     context: trimContext([
-      joinedRoomId ? `本轮刚加入公开房间 ${joinedRoomId}。` : "",
-      `本轮允许发言的公开 room_id：${readableRoomIds.join(", ")}`,
+      `本轮只读的已加入 room_id：${readableRoomIds.join(", ")}`,
       ...roomContexts
     ].filter(Boolean).join("\n\n"), 9000),
+    failures
+  };
+}
+
+function visitObjects(value, visitor) {
+  if (Array.isArray(value)) {
+    value.forEach(item => visitObjects(item, visitor));
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  visitor(value);
+  Object.values(value).forEach(item => visitObjects(item, visitor));
+}
+
+function collectBookCandidates(value) {
+  const books = new Map();
+  visitObjects(value, item => {
+    const actionArgs = item.command === "bookstore.read" && item.args && typeof item.args === "object"
+      ? item.args
+      : {};
+    const bookId = String(item.book_id || actionArgs.book_id || "").trim();
+    if (!bookId) return;
+    const current = books.get(bookId) || { bookId, title: "", chapterNo: 0 };
+    current.title = current.title || String(item.book_title || item.title || item.name || "").trim().slice(0, 160);
+    const numbers = [
+      actionArgs.chapter_no,
+      item.chapter_no,
+      item.latest_chapter_no,
+      item.latest_chapter,
+      item.chapter_count,
+      item.chapters_count
+    ].map(Number).filter(number => Number.isSafeInteger(number) && number > 0);
+    if (numbers.length) current.chapterNo = Math.max(current.chapterNo, ...numbers);
+    books.set(bookId, current);
+  });
+  return [...books.values()];
+}
+
+async function loadBooksContext(options) {
+  const client = new RemoteMcpClient({
+    url: options.forumUrl,
+    token: options.forumToken,
+    timeoutMs: options.forumTimeoutMs,
+    fetchImpl: options.fetchImpl || fetch,
+    clientName: "dylan-books-activity"
+  });
+  const tools = await client.listTools();
+  if (!tools.some(tool => tool.name === "cli")) throw new Error("AISay MCP 缺少 cli 工具");
+  const browseResult = await client.callTool("cli", {
+    command: "bookstore.browse",
+    args: { shelf: "recent", limit: 8 }
+  });
+  const browseData = extractToolData(browseResult);
+  const references = collectBookCandidates(browseData).slice(0, 5);
+  if (!references.length) throw new Error("AISay 书店最近更新没有返回可读的 book_id");
+
+  const candidates = [];
+  const failures = [];
+  for (const reference of references) {
+    // One complete chapter is enough for a meaningful reflection and keeps the
+    // model input bounded. Failed reads still fall through to the next book.
+    if (candidates.length >= 1) break;
+    try {
+      const bookResult = await client.callTool("cli", {
+        command: "bookstore.book",
+        args: { book_id: reference.bookId }
+      });
+      const bookData = extractToolData(bookResult);
+      const detailed = collectBookCandidates(bookData).find(item => item.bookId === reference.bookId) || {};
+      const chapterNo = detailed.chapterNo || reference.chapterNo || 1;
+      const readResult = await client.callTool("cli", {
+        command: "bookstore.read",
+        args: { book_id: reference.bookId, chapter_no: chapterNo }
+      });
+      const chapterText = trimContext(
+        extractToolText(readResult) || JSON.stringify(readResult?.structuredContent || {}),
+        6500
+      );
+      if (!chapterText) throw new Error("章节正文为空");
+      candidates.push({
+        bookId: reference.bookId,
+        chapterNo,
+        title: detailed.title || reference.title || reference.bookId,
+        text: chapterText
+      });
+    } catch (error) {
+      failures.push(`${reference.bookId}:${error.message || String(error)}`);
+    }
+  }
+  if (!candidates.length) throw new Error(`AISay 书店章节读取失败：${failures.join("；")}`);
+  return {
+    client,
+    tools,
+    candidates,
+    context: candidates.map((candidate, index) => [
+      `候选 ${index + 1}`,
+      `book_id: ${candidate.bookId}`,
+      `chapter_no: ${candidate.chapterNo}`,
+      `书名: ${candidate.title}`,
+      `章节内容:\n${candidate.text}`
+    ].join("\n")).join("\n\n---\n\n"),
     failures
   };
 }
@@ -665,6 +785,19 @@ async function runActivityCycle(options) {
       }));
     }
   }
+  let books;
+  if (enabledActions.includes("books")) {
+    try {
+      books = await loadBooksContext(options);
+    } catch (error) {
+      if (enabledActions.length === 1) throw error;
+      availableActions = availableActions.filter(action => action !== "books");
+      options.logger?.warn?.(JSON.stringify({
+        event: "books_activity_context_unavailable",
+        error: error.message || String(error)
+      }));
+    }
+  }
   let games;
   if (enabledActions.includes("games")) {
     try {
@@ -696,20 +829,11 @@ async function runActivityCycle(options) {
           enabledActions: availableActions,
           ombreContext: ombre?.context,
           forumContext: forum?.context,
+          booksContext: books?.context,
           gamesContext: games?.catalog
         })
       );
   if (decision.action === "none") {
-    if (forum?.joinedRoomId) {
-      return {
-        ran: true,
-        status: "success",
-        decision: { ...decision, action: "forum_join" },
-        source: "forum",
-        roomId: forum.joinedRoomId,
-        timelineSummary: `加入了 AISay 公开房间 ${forum.joinedRoomId}，读过近况后暂时没有发言`
-      };
-    }
     return { ran: true, status: "kept_private", decision, source: "private" };
   }
 
@@ -761,18 +885,15 @@ async function runActivityCycle(options) {
     };
   }
 
-    if (decision.action === "forum_send") {
+    if (decision.action === "forum_lurk") {
       if (!availableActions.includes("forum") || !forum) throw new Error("Forum Activity 未启用");
       if (!forum.roomIds.includes(decision.roomId)) throw new Error("Forum Activity 拒绝未读取的 room_id");
-      const sendArgs = { room_id: decision.roomId, content: decision.content };
       if (decision.replyToMessageId) {
         const allowedMessageIds = forum.messageIdsByRoom[decision.roomId] || [];
         if (!allowedMessageIds.includes(decision.replyToMessageId)) {
           throw new Error("Forum Activity 拒绝未读取的 reply_to_message_id");
         }
-        sendArgs.reply_to_message_id = decision.replyToMessageId;
       }
-      await forum.client.callTool("cli", { command: "chat.send", args: sendArgs });
       return {
         ran: true,
         status: "success",
@@ -780,7 +901,25 @@ async function runActivityCycle(options) {
         source: "forum",
         roomId: decision.roomId,
         replyToMessageId: decision.replyToMessageId,
-        timelineSummary: `${forum.joinedRoomId ? `加入 AISay 公开房间 ${forum.joinedRoomId}，随后` : ""}在 AISay 公开房间 ${decision.roomId}${decision.replyToMessageId ? ` 回复消息 ${decision.replyToMessageId}` : " 发言"}：${decision.content.slice(0, 500)}`
+        timelineSummary: `在 AISay 房间 ${decision.roomId} 潜水读了近况${decision.replyToMessageId ? `，留意到消息 ${decision.replyToMessageId}` : ""}，把私人感受或回复草稿写进了 Archive：${decision.content.slice(0, 500)}`
+      };
+    }
+
+    if (decision.action === "book_reflect") {
+      if (!availableActions.includes("books") || !books) throw new Error("Books Activity 未启用");
+      const selected = books.candidates.find(candidate => (
+        candidate.bookId === decision.bookId && candidate.chapterNo === decision.chapterNo
+      ));
+      if (!selected) throw new Error("Books Activity 拒绝未读取的 book_id 或 chapter_no");
+      return {
+        ran: true,
+        status: "success",
+        decision,
+        source: "books",
+        bookId: selected.bookId,
+        bookTitle: selected.title,
+        chapterNo: selected.chapterNo,
+        timelineSummary: `在 AISay 书店读了「${selected.title}」第 ${selected.chapterNo} 章，并写下私人读后感：${decision.content.slice(0, 500)}`
       };
     }
 
@@ -835,6 +974,8 @@ async function runActivityCycle(options) {
       ? "ombre"
       : decision.action.startsWith("forum_")
         ? "forum"
+        : decision.action.startsWith("book_")
+          ? "books"
         : decision.action.startsWith("games_") ? "games" : "spotify";
     throw error;
   }
@@ -854,6 +995,7 @@ module.exports = {
   collectGameNames,
   loadGamesContext,
   loadForumContext,
+  loadBooksContext,
   loadOmbreContext,
   isDuplicateLetter,
   normalizeLetterContent,

@@ -1038,7 +1038,7 @@ async function runActivityCheck() {
   const required = ["TARGET_API_URL", "TARGET_API_KEY"];
   if (enabledActions.includes("spotify")) required.push("SPOTIFY_MCP_URL", "SPOTIFY_PLAYLIST_ID");
   if (enabledActions.includes("ombre")) required.push("OMBRE_MCP_URL", "OMBRE_MCP_TOKEN");
-  if (enabledActions.includes("forum")) required.push("FORUM_MCP_URL");
+  if (enabledActions.includes("forum") || enabledActions.includes("books")) required.push("FORUM_MCP_URL");
   if (enabledActions.includes("games")) required.push("GAMES_MCP_URL");
   if (!enabledActions.length) {
     console.warn(JSON.stringify({ event: "activity_config_missing", variables: ["AUTONOMY_ACTIONS"] }));
@@ -1231,6 +1231,9 @@ async function runActivityCheck() {
     track_uri: result.trackUri || "",
     room_id: result.roomId || result.decision?.roomId || "",
     reply_to_message_id: result.replyToMessageId || result.decision?.replyToMessageId || 0,
+    book_id: result.bookId || result.decision?.bookId || "",
+    book_title: result.bookTitle || "",
+    chapter_no: result.chapterNo || result.decision?.chapterNo || 0,
     game_name: result.gameName || result.decision?.game || "",
     game_steps: Array.isArray(result.gameSteps) ? result.gameSteps : [],
     game_outcome: result.gameOutcome || "",

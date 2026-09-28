@@ -403,7 +403,7 @@ ADMIN_SESSION_DAYS=180
 ```
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
-- `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`games` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。
+- `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`books`、`games` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。`forum` 只会潜水读取已加入的公开房间并把感受或回复草稿存入私人 Archive，绝不会自动加群或发言；为兼容旧部署，启用 `forum` 时也会同时提供只读书店活动。若只想读书、不想潜水，可单独填写 `books`。
 - `AUTONOMY_TEST_FORCE_GAME`：仅用于短期联调，可填 `fishing` 或 `garden_cat`。设置后跳过“是否行动”的模型选择，直接测试该游戏，因此整轮只调用一次模型做批量规划；验证成功后立即删除。
 - Games Activity 目前只开放 `fishing` 和 `garden_cat`。每轮第一次模型请求决定是否玩，第二次根据指南、状态和目录一次性规划最多 8 条命令；之后由程序机械执行，不再逐步调用模型。钓鱼命令会合并成一个批次，花园命令会按顺序执行。它不会调用 `account`、重开、导入导出或共享便签，逐步参数和返回都会加密写入 Archive。
 - 管理页登录默认保留 180 天，并使用适合手机从外部链接打开的 SameSite=Lax Cookie；可用 `ADMIN_SESSION_DAYS` 调整为 1-365 天。
@@ -416,11 +416,11 @@ ADMIN_SESSION_DAYS=180
 - `MAX_INJECTED_PUSH_EVENTS`、`MAX_INJECTED_ACTIVITY_EVENTS`、`MAX_INJECTED_SOLO_EVENTS`：分别控制聊天上下文中保留的最近推送、成功 Activity 和成功 Solo 概要数量。未设置新的推送变量时会继续读取旧的 `MAX_INJECTED_WAKE_EVENTS`；新部署可只保留 `MAX_INJECTED_PUSH_EVENTS`。
 - `SPOTIFY_PLAYLIST_ID`：唯一允许写入的歌单。添加前会读取歌单前 50 首并按 Spotify track URI 查重；不需要 Spotify 设备在线，也不需要设备 ID。
 - Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
-- `FORUM_MCP_URL`：填写 AISay 完整的自动登录 MCP 地址。地址已经包含 `?token=...` 时，`FORUM_MCP_TOKEN` 留空即可；它属于密钥，只放 Render Secret，不要提交到 GitHub。
+- `FORUM_MCP_URL`：填写 AISay 完整的自动登录 MCP 地址，供论坛潜水与书店阅读共同使用。地址已经包含 `?token=...` 时，`FORUM_MCP_TOKEN` 留空即可；它属于密钥，只放 Render Secret，不要提交到 GitHub。
 
 Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CHECK_INTERVAL_MINUTES` 或普通唤醒阈值影响。它与 Wake/Solo 恰好撞车时只会跳过这一次条件检查，稍后按自己的频率重试，避免同时调用两个模型。
 
-部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test`、`/admin/activity/forum-test` 和 `/admin/activity/games-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。论坛测试只调用无副作用的 `cli({command:"help"})` 并返回指令指南；可用 `/admin/activity/forum-test?path=chat` 继续查询领域或完整命令。游戏测试默认只调用 `list_games`；传入 `/admin/activity/games-test?game=fishing` 时还会只读调用该游戏的 `get_guide`；再加 `&inspect=help` 会固定调用只读的 `play(game, action="help", params={})`。这些入口不会开局、游玩、修改账号或调用模型。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
+部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test`、`/admin/activity/forum-test` 和 `/admin/activity/games-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。AISay 测试入口只调用无副作用的 `cli({command:"help"})` 并返回指令指南；可用 `/admin/activity/forum-test?path=bookstore.read` 等路径继续查询领域或完整命令。游戏测试默认只调用 `list_games`；传入 `/admin/activity/games-test?game=fishing` 时还会只读调用该游戏的 `get_guide`；再加 `&inspect=help` 会固定调用只读的 `play(game, action="help", params={})`。这些入口不会开局、游玩、修改账号或调用模型。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
 
 ## 🌦️ 天气注入
 
