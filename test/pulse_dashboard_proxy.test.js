@@ -15,6 +15,14 @@ test("rewrites dashboard routes to stay on the Render proxy", () => {
   assert.match(rewritten, /fetch\('\/pulse\/api\/state'/);
   assert.match(rewritten, /fetch\('\/pulse\/api\/solo\/settings'/);
   assert.match(rewritten, /location\.href = '\/pulse'/);
+  assert.match(rewritten, /dylan-hub-pulse/);
+  assert.match(rewritten, /dylan-hub-archive-frame/);
+  assert.match(rewritten, /\/admin\/archive\?embedded=1/);
+  assert.equal((rewritten.match(/dylan-unified-dashboard-script/g) || []).length, 1);
+  const hubScript = rewritten.match(/<script id="dylan-unified-dashboard-script">([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(hubScript);
+  assert.doesNotThrow(() => new Function("document", hubScript));
+  assert.equal(rewriteDashboardHtml(rewritten), rewritten);
 });
 
 test("forwards Solo settings as JSON without exposing the Pulse client key", async () => {

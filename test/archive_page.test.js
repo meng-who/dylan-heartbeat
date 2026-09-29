@@ -37,4 +37,5 @@ test("archive page client script is valid JavaScript", () => {
   assert.match(html, /value\.length <= 400/);
   assert.match(html, /查看完整内容/);
   assert.match(html, /游戏：/);
+  assert.match(html, /href="\/pulse" target="_top">身体状态/);
 });

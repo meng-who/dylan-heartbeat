@@ -5,12 +5,66 @@ function joinPulseUrl(baseUrl, pathname) {
   return target.toString();
 }
 
+const UNIFIED_DASHBOARD_STYLE = `<style id="dylan-unified-dashboard-style">
+  .dylan-hub-bar {
+    position: fixed; right: 50%; bottom: max(10px, env(safe-area-inset-bottom)); z-index: 2147483647;
+    display: grid; grid-template-columns: 1fr 1fr; width: min(360px, calc(100% - 24px));
+    padding: 5px; border: 1px solid rgba(199, 150, 166, .42); border-radius: 8px;
+    background: rgba(47, 31, 39, .94); box-shadow: 0 10px 30px rgba(25, 12, 18, .28);
+    backdrop-filter: blur(14px); transform: translateX(50%);
+  }
+  .dylan-hub-tab {
+    appearance: none !important; width: auto !important; min-height: 40px !important; margin: 0 !important;
+    border: 0 !important; border-radius: 5px !important; padding: 8px 12px !important;
+    color: #d8c8cf !important; background: transparent !important; box-shadow: none !important;
+    font: 600 14px/1.2 system-ui, "PingFang SC", sans-serif !important; letter-spacing: 0 !important;
+    text-transform: none !important; cursor: pointer;
+  }
+  .dylan-hub-tab[aria-selected="true"] { color: #351f29 !important; background: #f1dbe3 !important; }
+  .dylan-hub-archive {
+    position: fixed; inset: 0 0 0 0; z-index: 2147483646; display: none;
+    width: 100%; height: calc(100% - 66px - env(safe-area-inset-bottom)); border: 0; background: #fbf8f9;
+  }
+  .dylan-hub-archive.is-visible { display: block; }
+</style>`;
+
+const UNIFIED_DASHBOARD_MARKUP = `<nav class="dylan-hub-bar" aria-label="Dylan 后台页面">
+  <button id="dylan-hub-pulse" class="dylan-hub-tab" type="button" aria-selected="true">身体状态</button>
+  <button id="dylan-hub-archive" class="dylan-hub-tab" type="button" aria-selected="false">Archive</button>
+</nav>
+<iframe id="dylan-hub-archive-frame" class="dylan-hub-archive" title="Dylan Archive"></iframe>
+<script id="dylan-unified-dashboard-script">
+  (() => {
+    const pulseTab = document.getElementById("dylan-hub-pulse");
+    const archiveTab = document.getElementById("dylan-hub-archive");
+    const archiveFrame = document.getElementById("dylan-hub-archive-frame");
+    const select = (showArchive) => {
+      pulseTab.setAttribute("aria-selected", String(!showArchive));
+      archiveTab.setAttribute("aria-selected", String(showArchive));
+      archiveFrame.classList.toggle("is-visible", showArchive);
+      if (showArchive && !archiveFrame.dataset.loaded) {
+        archiveFrame.src = "/admin/archive?embedded=1";
+        archiveFrame.dataset.loaded = "true";
+      }
+    };
+    pulseTab.addEventListener("click", () => select(false));
+    archiveTab.addEventListener("click", () => select(true));
+  })();
+</script>`;
+
 function rewriteDashboardHtml(html) {
-  return String(html || "")
+  let rewritten = String(html || "")
     .replaceAll('action="/body/login"', 'action="/pulse/login"')
     .replaceAll("fetch('/api/state'", "fetch('/pulse/api/state'")
     .replaceAll("fetch('/api/solo/settings'", "fetch('/pulse/api/solo/settings'")
     .replaceAll("location.href = '/body'", "location.href = '/pulse'");
+  if (rewritten.includes("dylan-unified-dashboard-script")) return rewritten;
+  rewritten = /<\/head>/i.test(rewritten)
+    ? rewritten.replace(/<\/head>/i, `${UNIFIED_DASHBOARD_STYLE}</head>`)
+    : `${UNIFIED_DASHBOARD_STYLE}${rewritten}`;
+  return /<\/body>/i.test(rewritten)
+    ? rewritten.replace(/<\/body>/i, `${UNIFIED_DASHBOARD_MARKUP}</body>`)
+    : `${rewritten}${UNIFIED_DASHBOARD_MARKUP}`;
 }
 
 function rewriteLocation(location) {

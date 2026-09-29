@@ -1297,6 +1297,7 @@ function archivePageHtml() {
         <p>自动唤醒、Solo 与自主活动记录。档案在磁盘中始终加密保存。</p>
       </div>
       <div class="actions">
+        <a class="button" href="/pulse" target="_top">身体状态</a>
         <a class="button" href="/admin">返回管理页</a>
         <a class="button" href="/admin/archive/export">导出密文</a>
       </div>
@@ -1519,16 +1520,17 @@ function archivePageHtml() {
 </html>`;
 }
 
-function setArchivePrivacyHeaders(reply) {
+function setArchivePrivacyHeaders(reply, { embedded = false } = {}) {
   return reply
     .header("Cache-Control", "no-store")
     .header("Referrer-Policy", "no-referrer")
     .header("X-Content-Type-Options", "nosniff")
-    .header("X-Frame-Options", "DENY");
+    .header("X-Frame-Options", embedded ? "SAMEORIGIN" : "DENY");
 }
 
 app.get("/admin/archive", { preHandler: basicAuth }, async (req, reply) => {
-  setArchivePrivacyHeaders(reply).type("text/html").send(archivePageHtml());
+  const embedded = String(req.query?.embedded || "") === "1";
+  setArchivePrivacyHeaders(reply, { embedded }).type("text/html").send(archivePageHtml());
 });
 
 app.get("/admin/archive/data", { preHandler: basicAuth }, async (req, reply) => {

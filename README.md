@@ -526,7 +526,7 @@ DIARY_ENABLED=false
 WAKE_ARCHIVE_KEY=32字节Base64URL密钥
 ```
 
-部署后从 `/admin` 点击 **Wake Archive**，或直接打开 `/admin/archive`。该页面沿用管理页的 Basic Auth，可以搜索、按结果筛选和删除单条记录；“导出密文”下载的是 AES-256-GCM 加密 JSONL，不包含可直接阅读的正文。
+部署后打开 `/pulse`，可用页面底部的“身体状态 / Archive”切换栏在两个视图间直接切换；Archive 只在首次点开时加载。原来的 `/admin/archive` 独立入口仍然保留。Archive 沿用管理页的 Basic Auth，可以搜索、按结果筛选和删除单条记录；“导出密文”下载的是 AES-256-GCM 加密 JSONL，不包含可直接阅读的正文。
 
 请把密钥保存在密码管理器里，不要提交到 Git。密钥丢失后，已有档案无法解密；未配置或配置错误时，系统会跳过归档，但不会阻断正常推送。
 
