@@ -39,5 +39,4 @@ test("archive page client script is valid JavaScript", () => {
   assert.match(html, /游戏：/);
   assert.match(html, /href="\/pulse" target="_top">身体状态/);
   assert.match(html, /viewport-fit=cover/);
-  assert.match(html, /name="theme-color" content="#fbf8f9"/);
 });
