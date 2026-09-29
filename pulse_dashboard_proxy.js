@@ -6,7 +6,9 @@ function joinPulseUrl(baseUrl, pathname) {
 }
 
 const UNIFIED_DASHBOARD_STYLE = `<style id="dylan-unified-dashboard-style">
-  html.dylan-hub-archive-open, html.dylan-hub-archive-open body { overflow: hidden !important; }
+  html.dylan-hub-archive-open, html.dylan-hub-archive-open body {
+    overflow: hidden !important; background: #fbf8f9 !important;
+  }
   .dylan-hub-bar {
     position: fixed; right: 50%; bottom: max(10px, env(safe-area-inset-bottom)); z-index: 2147483647;
     display: grid; grid-template-columns: 1fr 1fr; width: min(360px, calc(100% - 24px));
@@ -30,7 +32,7 @@ const UNIFIED_DASHBOARD_STYLE = `<style id="dylan-unified-dashboard-style">
   .dylan-hub-bar.is-archive .dylan-hub-tab[aria-selected="true"] { color: #fff !important; background: #875266 !important; }
   .dylan-hub-archive {
     position: fixed; inset: 0 0 0 0; z-index: 2147483646; display: none;
-    width: 100%; height: 100%; border: 0; background: #fbf8f9;
+    width: 100%; height: 100vh; height: 100dvh; border: 0; background: #fbf8f9;
   }
   .dylan-hub-archive.is-visible { display: block; }
 </style>`;
@@ -46,11 +48,23 @@ const UNIFIED_DASHBOARD_MARKUP = `<nav class="dylan-hub-bar" aria-label="Dylan å
     const archiveTab = document.getElementById("dylan-hub-archive");
     const archiveFrame = document.getElementById("dylan-hub-archive-frame");
     const tabBar = pulseTab.closest(".dylan-hub-bar");
+    const viewportMeta = document.querySelector('meta[name="viewport"]');
+    if (viewportMeta && !viewportMeta.content.includes("viewport-fit")) {
+      viewportMeta.content += ", viewport-fit=cover";
+    }
+    let themeMeta = document.querySelector('meta[name="theme-color"]');
+    if (!themeMeta) {
+      themeMeta = document.createElement("meta");
+      themeMeta.name = "theme-color";
+      document.head.append(themeMeta);
+    }
+    const pulseTheme = themeMeta.content || "#20161b";
     const select = (showArchive) => {
       pulseTab.setAttribute("aria-selected", String(!showArchive));
       archiveTab.setAttribute("aria-selected", String(showArchive));
       document.documentElement.classList.toggle("dylan-hub-archive-open", showArchive);
       tabBar.classList.toggle("is-archive", showArchive);
+      themeMeta.content = showArchive ? "#fbf8f9" : pulseTheme;
       archiveFrame.classList.toggle("is-visible", showArchive);
       if (showArchive && !archiveFrame.dataset.loaded) {
         archiveFrame.src = "/admin/archive?embedded=1";
