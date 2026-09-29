@@ -6,6 +6,7 @@ function joinPulseUrl(baseUrl, pathname) {
 }
 
 const UNIFIED_DASHBOARD_STYLE = `<style id="dylan-unified-dashboard-style">
+  html.dylan-hub-archive-open, html.dylan-hub-archive-open body { overflow: hidden !important; }
   .dylan-hub-bar {
     position: fixed; right: 50%; bottom: max(10px, env(safe-area-inset-bottom)); z-index: 2147483647;
     display: grid; grid-template-columns: 1fr 1fr; width: min(360px, calc(100% - 24px));
@@ -48,6 +49,7 @@ const UNIFIED_DASHBOARD_MARKUP = `<nav class="dylan-hub-bar" aria-label="Dylan å
     const select = (showArchive) => {
       pulseTab.setAttribute("aria-selected", String(!showArchive));
       archiveTab.setAttribute("aria-selected", String(showArchive));
+      document.documentElement.classList.toggle("dylan-hub-archive-open", showArchive);
       tabBar.classList.toggle("is-archive", showArchive);
       archiveFrame.classList.toggle("is-visible", showArchive);
       if (showArchive && !archiveFrame.dataset.loaded) {
