@@ -1251,7 +1251,7 @@ function archivePageHtml() {
   <title>Wake Archive</title>
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; color: #352e31; background: #fbf8f9; font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
+    body { margin: 0; padding-bottom: calc(82px + env(safe-area-inset-bottom)); color: #352e31; background: #fbf8f9; font-family: Inter, "PingFang SC", "Microsoft YaHei", sans-serif; }
     main { width: min(920px, calc(100% - 32px)); margin: 36px auto 72px; }
     header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 24px; }
     h1 { margin: 0 0 6px; color: #7f4052; font-family: Georgia, serif; font-size: 28px; font-weight: 500; letter-spacing: 0; }
@@ -1280,6 +1280,9 @@ function archivePageHtml() {
     .meta { color: #7d7176; font-size: 12px; line-height: 1.6; }
     .delete { min-height: 30px; margin-top: 10px; padding: 4px 9px; color: #8f4547; font-size: 12px; }
     .empty { padding: 48px 0; color: #776b70; text-align: center; }
+    .archive-hub-bar { position: fixed; right: 50%; bottom: max(10px, env(safe-area-inset-bottom)); z-index: 1000; display: grid; grid-template-columns: 1fr 1fr; width: min(360px, calc(100% - 24px)); padding: 5px; border: 1px solid rgba(196, 151, 165, .5); border-radius: 8px; background: rgba(251, 248, 249, .96); box-shadow: 0 8px 24px rgba(78, 45, 57, .16); backdrop-filter: blur(14px); transform: translateX(50%); }
+    .archive-hub-tab { display: grid; place-items: center; min-height: 40px; border-radius: 5px; padding: 8px 12px; color: #785665; background: transparent; font: 600 14px/1.2 system-ui, "PingFang SC", sans-serif; text-decoration: none; }
+    .archive-hub-tab[aria-current="page"] { color: #fff; background: #875266; }
     @media (max-width: 640px) {
       main { width: min(100% - 24px, 920px); margin-top: 22px; }
       header { display: block; }
@@ -1297,7 +1300,6 @@ function archivePageHtml() {
         <p>自动唤醒、Solo 与自主活动记录。档案在磁盘中始终加密保存。</p>
       </div>
       <div class="actions">
-        <a class="button" href="/pulse" target="_top">身体状态</a>
         <a class="button" href="/admin">返回管理页</a>
         <a class="button" href="/admin/archive/export">导出密文</a>
       </div>
@@ -1330,6 +1332,10 @@ function archivePageHtml() {
     <div id="summary"></div>
     <section id="records" aria-live="polite"></section>
   </main>
+  <nav class="archive-hub-bar" aria-label="Dylan 后台页面">
+    <a class="archive-hub-tab" href="/pulse">身体状态</a>
+    <a class="archive-hub-tab" href="/admin/archive" aria-current="page">Archive</a>
+  </nav>
   <script>
     const labels = {
       sent: "已发送", duplicate: "重复拦截", rejected: "内容拦截",
@@ -1520,17 +1526,16 @@ function archivePageHtml() {
 </html>`;
 }
 
-function setArchivePrivacyHeaders(reply, { embedded = false } = {}) {
+function setArchivePrivacyHeaders(reply) {
   return reply
     .header("Cache-Control", "no-store")
     .header("Referrer-Policy", "no-referrer")
     .header("X-Content-Type-Options", "nosniff")
-    .header("X-Frame-Options", embedded ? "SAMEORIGIN" : "DENY");
+    .header("X-Frame-Options", "DENY");
 }
 
 app.get("/admin/archive", { preHandler: basicAuth }, async (req, reply) => {
-  const embedded = String(req.query?.embedded || "") === "1";
-  setArchivePrivacyHeaders(reply, { embedded }).type("text/html").send(archivePageHtml());
+  setArchivePrivacyHeaders(reply).type("text/html").send(archivePageHtml());
 });
 
 app.get("/admin/archive/data", { preHandler: basicAuth }, async (req, reply) => {

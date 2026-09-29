@@ -6,7 +6,6 @@ function joinPulseUrl(baseUrl, pathname) {
 }
 
 const UNIFIED_DASHBOARD_STYLE = `<style id="dylan-unified-dashboard-style">
-  html.dylan-hub-archive-open, html.dylan-hub-archive-open body { overflow: hidden !important; }
   .dylan-hub-bar {
     position: fixed; right: 50%; bottom: max(10px, env(safe-area-inset-bottom)); z-index: 2147483647;
     display: grid; grid-template-columns: 1fr 1fr; width: min(360px, calc(100% - 24px));
@@ -15,54 +14,26 @@ const UNIFIED_DASHBOARD_STYLE = `<style id="dylan-unified-dashboard-style">
     backdrop-filter: blur(14px); transform: translateX(50%);
   }
   .dylan-hub-tab {
-    appearance: none !important; width: auto !important; min-height: 40px !important; margin: 0 !important;
+    appearance: none !important; display: grid !important; place-items: center !important;
+    width: auto !important; min-height: 40px !important; margin: 0 !important;
     border: 0 !important; border-radius: 5px !important; padding: 8px 12px !important;
     color: #d8c8cf !important; background: transparent !important; box-shadow: none !important;
     font: 600 14px/1.2 system-ui, "PingFang SC", sans-serif !important; letter-spacing: 0 !important;
-    text-transform: none !important; cursor: pointer;
+    text-transform: none !important; text-decoration: none !important; cursor: pointer;
   }
-  .dylan-hub-tab[aria-selected="true"] { color: #351f29 !important; background: #f1dbe3 !important; }
-  .dylan-hub-bar.is-archive {
-    border-color: rgba(196, 151, 165, .5); background: rgba(251, 248, 249, .96);
-    box-shadow: 0 8px 24px rgba(78, 45, 57, .16);
-  }
-  .dylan-hub-bar.is-archive .dylan-hub-tab { color: #785665 !important; }
-  .dylan-hub-bar.is-archive .dylan-hub-tab[aria-selected="true"] { color: #fff !important; background: #875266 !important; }
-  .dylan-hub-archive {
-    position: fixed; inset: 0 0 0 0; z-index: 2147483646; display: none;
-    width: 100%; height: 100vh; height: 100lvh; border: 0; background: #fbf8f9;
-  }
-  .dylan-hub-archive.is-visible { display: block; }
+  .dylan-hub-tab[aria-current="page"] { color: #351f29 !important; background: #f1dbe3 !important; }
 </style>`;
 
 const UNIFIED_DASHBOARD_MARKUP = `<nav class="dylan-hub-bar" aria-label="Dylan 后台页面">
-  <button id="dylan-hub-pulse" class="dylan-hub-tab" type="button" aria-selected="true">身体状态</button>
-  <button id="dylan-hub-archive" class="dylan-hub-tab" type="button" aria-selected="false">Archive</button>
+  <a id="dylan-hub-pulse" class="dylan-hub-tab" href="/pulse" aria-current="page">身体状态</a>
+  <a id="dylan-hub-archive" class="dylan-hub-tab" href="/admin/archive">Archive</a>
 </nav>
-<iframe id="dylan-hub-archive-frame" class="dylan-hub-archive" title="Dylan Archive"></iframe>
 <script id="dylan-unified-dashboard-script">
   (() => {
-    const pulseTab = document.getElementById("dylan-hub-pulse");
-    const archiveTab = document.getElementById("dylan-hub-archive");
-    const archiveFrame = document.getElementById("dylan-hub-archive-frame");
-    const tabBar = pulseTab.closest(".dylan-hub-bar");
     const viewportMeta = document.querySelector('meta[name="viewport"]');
     if (viewportMeta && !viewportMeta.content.includes("viewport-fit")) {
       viewportMeta.content += ", viewport-fit=cover";
     }
-    const select = (showArchive) => {
-      pulseTab.setAttribute("aria-selected", String(!showArchive));
-      archiveTab.setAttribute("aria-selected", String(showArchive));
-      document.documentElement.classList.toggle("dylan-hub-archive-open", showArchive);
-      tabBar.classList.toggle("is-archive", showArchive);
-      archiveFrame.classList.toggle("is-visible", showArchive);
-      if (showArchive && !archiveFrame.dataset.loaded) {
-        archiveFrame.src = "/admin/archive?embedded=1";
-        archiveFrame.dataset.loaded = "true";
-      }
-    };
-    pulseTab.addEventListener("click", () => select(false));
-    archiveTab.addEventListener("click", () => select(true));
   })();
 </script>`;
 
