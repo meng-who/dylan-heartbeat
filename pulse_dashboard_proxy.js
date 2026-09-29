@@ -21,9 +21,15 @@ const UNIFIED_DASHBOARD_STYLE = `<style id="dylan-unified-dashboard-style">
     text-transform: none !important; cursor: pointer;
   }
   .dylan-hub-tab[aria-selected="true"] { color: #351f29 !important; background: #f1dbe3 !important; }
+  .dylan-hub-bar.is-archive {
+    border-color: rgba(196, 151, 165, .5); background: rgba(251, 248, 249, .96);
+    box-shadow: 0 8px 24px rgba(78, 45, 57, .16);
+  }
+  .dylan-hub-bar.is-archive .dylan-hub-tab { color: #785665 !important; }
+  .dylan-hub-bar.is-archive .dylan-hub-tab[aria-selected="true"] { color: #fff !important; background: #875266 !important; }
   .dylan-hub-archive {
     position: fixed; inset: 0 0 0 0; z-index: 2147483646; display: none;
-    width: 100%; height: calc(100% - 66px - env(safe-area-inset-bottom)); border: 0; background: #fbf8f9;
+    width: 100%; height: 100%; border: 0; background: #fbf8f9;
   }
   .dylan-hub-archive.is-visible { display: block; }
 </style>`;
@@ -38,9 +44,11 @@ const UNIFIED_DASHBOARD_MARKUP = `<nav class="dylan-hub-bar" aria-label="Dylan å
     const pulseTab = document.getElementById("dylan-hub-pulse");
     const archiveTab = document.getElementById("dylan-hub-archive");
     const archiveFrame = document.getElementById("dylan-hub-archive-frame");
+    const tabBar = pulseTab.closest(".dylan-hub-bar");
     const select = (showArchive) => {
       pulseTab.setAttribute("aria-selected", String(!showArchive));
       archiveTab.setAttribute("aria-selected", String(showArchive));
+      tabBar.classList.toggle("is-archive", showArchive);
       archiveFrame.classList.toggle("is-visible", showArchive);
       if (showArchive && !archiveFrame.dataset.loaded) {
         archiveFrame.src = "/admin/archive?embedded=1";

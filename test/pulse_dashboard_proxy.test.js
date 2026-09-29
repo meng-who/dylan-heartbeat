@@ -17,6 +17,8 @@ test("rewrites dashboard routes to stay on the Render proxy", () => {
   assert.match(rewritten, /location\.href = '\/pulse'/);
   assert.match(rewritten, /dylan-hub-pulse/);
   assert.match(rewritten, /dylan-hub-archive-frame/);
+  assert.match(rewritten, /height: 100%/);
+  assert.match(rewritten, /classList\.toggle\("is-archive", showArchive\)/);
   assert.match(rewritten, /\/admin\/archive\?embedded=1/);
   assert.equal((rewritten.match(/dylan-unified-dashboard-script/g) || []).length, 1);
   const hubScript = rewritten.match(/<script id="dylan-unified-dashboard-script">([\s\S]*?)<\/script>/)?.[1];
