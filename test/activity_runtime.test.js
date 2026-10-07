@@ -3,8 +3,10 @@ const test = require("node:test");
 
 const {
   activityGate,
+  buildReadingHistoryContext,
   classifyActivityFailure,
   extractTrackUris,
+  formatChapterRanges,
   isDuplicateLetter,
   normalizeTrackQuery,
   parseActivityDecision,
@@ -120,6 +122,16 @@ test("extracts every Spotify track URI from playlist item responses", () => {
 test("keeps the legacy forum setting as read-only forum plus books", () => {
   assert.deepEqual(parseEnabledActions("forum"), ["forum", "books"]);
   assert.deepEqual(parseEnabledActions("books"), ["books"]);
+});
+
+test("compresses reading history chapter ranges without including reflections", () => {
+  assert.equal(formatChapterRanges([5, 2, 1, 3, 5, 8]), "1-3、5、8");
+  assert.equal(buildReadingHistoryContext([{
+    bookId: "book-1",
+    title: "潮汐旧信",
+    chapters: [1, 2, 3],
+    reflection: "这段不应进入模型上下文"
+  }], ["book-1"]), "- 潮汐旧信 (book-1)：已读 1-3");
 });
 
 test("converts a legacy forum send decision into a private lurk draft", () => {
@@ -562,6 +574,12 @@ test("reads recent AISay chapters and archives one private reflection without wr
     model: "model",
     enabledActions: "books",
     forumUrl: "https://aisay.test/chatroom/mcp?token=secret",
+    readingHistory: [{
+      bookId: "book-1",
+      title: "潮汐旧信",
+      chapters: [1],
+      lastReadAt: "2026-09-01T00:00:00.000Z"
+    }],
     fetchImpl
   });
 
@@ -572,6 +590,65 @@ test("reads recent AISay chapters and archives one private reflection without wr
   const commands = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params.arguments.command);
   assert.deepEqual(commands, ["bookstore.browse", "bookstore.book", "bookstore.read"]);
   assert.equal(commands.some(command => /comment|tip|urge|follow|write/.test(command)), false);
+});
+
+test("skips completed books and starts an unread book from chapter one", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      assert.match(body.messages[1].content, /旧书 \(book-old\)：已读 1-2/);
+      assert.match(body.messages[1].content, /chapter_no: 1/);
+      return reply({ choices: [{ message: { content: [
+        "<activity>",
+        "<action>book_reflect</action>",
+        "<book_id>book-new</book_id>",
+        "<chapter_no>1</chapter_no>",
+        "<reason>想从开头认识它</reason>",
+        "<content>第一章把人物放进了一个很安静的岔路口。</content>",
+        "</activity>"
+      ].join("\n") } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "cli" }] } });
+    const command = body.params?.arguments?.command;
+    const bookId = body.params?.arguments?.args?.book_id;
+    const texts = {
+      "bookstore.browse": JSON.stringify({ books: [
+        { book_id: "book-old", title: "旧书", latest_chapter_no: 2 },
+        { book_id: "book-new", title: "新书", latest_chapter_no: 4 }
+      ] }),
+      "bookstore.book": JSON.stringify({ book_id: bookId, title: bookId === "book-old" ? "旧书" : "新书", chapter_count: bookId === "book-old" ? 2 : 4 }),
+      "bookstore.read": JSON.stringify({ book_id: "book-new", chapter_no: 1, content: "第一章正文。" })
+    };
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: texts[command] || "ok" }] } });
+  };
+
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    enabledActions: "books",
+    forumUrl: "https://aisay.test/chatroom/mcp?token=secret",
+    readingHistory: [{
+      bookId: "book-old",
+      title: "旧书",
+      chapters: [1, 2],
+      lastReadAt: "2026-09-02T00:00:00.000Z"
+    }],
+    fetchImpl
+  });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.bookId, "book-new");
+  assert.equal(result.chapterNo, 1);
+  const toolCalls = calls.filter(call => call.body.method === "tools/call").map(call => call.body.params.arguments);
+  assert.deepEqual(toolCalls.map(call => call.command), [
+    "bookstore.browse", "bookstore.book", "bookstore.book", "bookstore.read"
+  ]);
+  assert.equal(toolCalls.at(-1).args.chapter_no, 1);
 });
 
 test("plans and executes a fishing batch with only two model calls", async () => {

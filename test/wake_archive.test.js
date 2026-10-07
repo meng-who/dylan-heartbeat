@@ -8,10 +8,12 @@ const test = require("node:test");
 const {
   appendWakeArchive,
   buildWakeArchiveOutcome,
+  collectReadingHistory,
   decryptArchiveLine,
   deleteWakeArchiveRecord,
   encryptArchiveRecord,
   parseArchiveKey,
+  readReadingHistory,
   readWakeArchive
 } = require("../wake_archive");
 
@@ -63,6 +65,64 @@ test("fails closed when the archive key is absent", () => {
     saved: false,
     reason: "not_configured"
   });
+});
+
+test("builds a compact reading history from all recognizable successful archive records", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "reading-history-"));
+  const filePath = path.join(directory, "archive.enc.jsonl");
+  const key = crypto.randomBytes(32);
+
+  try {
+    appendWakeArchive({
+      kind: "activity",
+      status: "success",
+      source: "books",
+      action: "book_reflect",
+      book_id: "book-1",
+      book_title: "潮汐旧信",
+      chapter_no: 1,
+      candidate: "没有固定格式的旧读后感",
+      created_at: "2026-09-01T00:00:00.000Z"
+    }, { key, filePath });
+    appendWakeArchive({
+      kind: "activity",
+      status: "success",
+      source: "books",
+      action: "book_reflect",
+      book_id: "book-1",
+      book_title: "潮汐旧信",
+      chapter_no: 3,
+      candidate: "另一种写法也不影响识别",
+      created_at: "2026-09-03T00:00:00.000Z"
+    }, { key, filePath });
+    appendWakeArchive({
+      kind: "activity",
+      status: "failed",
+      source: "books",
+      action: "book_reflect",
+      book_id: "book-1",
+      chapter_no: 4
+    }, { key, filePath });
+    appendWakeArchive({
+      kind: "activity",
+      status: "success",
+      source: "spotify",
+      book_id: "not-a-book",
+      chapter_no: 1
+    }, { key, filePath });
+
+    const history = readReadingHistory({ key, filePath });
+    assert.equal(history.unreadable, 0);
+    assert.deepEqual(history.books, [{
+      bookId: "book-1",
+      title: "潮汐旧信",
+      chapters: [1, 3],
+      lastReadAt: "2026-09-03T00:00:00.000Z"
+    }]);
+    assert.deepEqual(collectReadingHistory([]), []);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("classifies sent, blocked and silent wake outcomes", () => {

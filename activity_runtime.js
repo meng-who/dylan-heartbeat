@@ -482,6 +482,37 @@ function collectBookCandidates(value) {
   return [...books.values()];
 }
 
+function formatChapterRanges(chapters = []) {
+  const numbers = [...new Set(chapters.map(Number).filter(number => Number.isSafeInteger(number) && number > 0))]
+    .sort((left, right) => left - right);
+  const ranges = [];
+  for (let index = 0; index < numbers.length; index += 1) {
+    const start = numbers[index];
+    let end = start;
+    while (numbers[index + 1] === end + 1) end = numbers[++index];
+    ranges.push(start === end ? String(start) : `${start}-${end}`);
+  }
+  return ranges.join("、");
+}
+
+function buildReadingHistoryContext(readingHistory = [], relevantBookIds = []) {
+  const relevant = new Set(relevantBookIds);
+  const prioritized = [
+    ...readingHistory.filter(book => relevant.has(book.bookId)),
+    ...readingHistory.filter(book => !relevant.has(book.bookId))
+  ];
+  const seen = new Set();
+  const lines = [];
+  for (const book of prioritized) {
+    if (seen.has(book.bookId) || lines.length >= 10) continue;
+    seen.add(book.bookId);
+    const chapters = formatChapterRanges(book.chapters);
+    if (!chapters) continue;
+    lines.push(`- ${book.title || book.bookId} (${book.bookId})：已读 ${chapters}`);
+  }
+  return trimContext(lines.join("\n"), 1600);
+}
+
 async function loadBooksContext(options) {
   const client = new RemoteMcpClient({
     url: options.forumUrl,
@@ -497,7 +528,24 @@ async function loadBooksContext(options) {
     args: { shelf: "recent", limit: 8 }
   });
   const browseData = extractToolData(browseResult);
-  const references = collectBookCandidates(browseData).slice(0, 5);
+  const readingHistory = Array.isArray(options.readingHistory) ? options.readingHistory : [];
+  const historyByBookId = new Map(readingHistory.map(book => [book.bookId, book]));
+  const referencesById = new Map();
+  for (const book of readingHistory.slice(0, 5)) {
+    referencesById.set(book.bookId, {
+      bookId: book.bookId,
+      title: book.title || book.bookId,
+      chapterNo: 0
+    });
+  }
+  for (const book of collectBookCandidates(browseData)) {
+    const current = referencesById.get(book.bookId);
+    referencesById.set(book.bookId, {
+      ...book,
+      title: book.title || current?.title || book.bookId
+    });
+  }
+  const references = [...referencesById.values()].slice(0, 10);
   if (!references.length) throw new Error("AISay 书店最近更新没有返回可读的 book_id");
 
   const candidates = [];
@@ -513,7 +561,14 @@ async function loadBooksContext(options) {
       });
       const bookData = extractToolData(bookResult);
       const detailed = collectBookCandidates(bookData).find(item => item.bookId === reference.bookId) || {};
-      const chapterNo = detailed.chapterNo || reference.chapterNo || 1;
+      const latestChapterNo = detailed.chapterNo || reference.chapterNo || 1;
+      const history = historyByBookId.get(reference.bookId);
+      const lastReadChapter = Math.max(0, ...(history?.chapters || []));
+      if (lastReadChapter >= latestChapterNo) {
+        failures.push(`${reference.bookId}:没有未读新章`);
+        continue;
+      }
+      const chapterNo = lastReadChapter ? lastReadChapter + 1 : 1;
       const readResult = await client.callTool("cli", {
         command: "bookstore.read",
         args: { book_id: reference.bookId, chapter_no: chapterNo }
@@ -534,17 +589,24 @@ async function loadBooksContext(options) {
     }
   }
   if (!candidates.length) throw new Error(`AISay 书店章节读取失败：${failures.join("；")}`);
+  const historyContext = buildReadingHistoryContext(
+    readingHistory,
+    references.map(reference => reference.bookId)
+  );
   return {
     client,
     tools,
     candidates,
-    context: candidates.map((candidate, index) => [
-      `候选 ${index + 1}`,
-      `book_id: ${candidate.bookId}`,
-      `chapter_no: ${candidate.chapterNo}`,
-      `书名: ${candidate.title}`,
-      `章节内容:\n${candidate.text}`
-    ].join("\n")).join("\n\n---\n\n"),
+    context: [
+      historyContext ? `阅读履历（Archive 自动整理，仅用于续读和避开重复）：\n${historyContext}` : "",
+      candidates.map((candidate, index) => [
+        `候选 ${index + 1}`,
+        `book_id: ${candidate.bookId}`,
+        `chapter_no: ${candidate.chapterNo}`,
+        `书名: ${candidate.title}`,
+        `章节内容:\n${candidate.text}`
+      ].join("\n")).join("\n\n---\n\n")
+    ].filter(Boolean).join("\n\n---\n\n"),
     failures
   };
 }
@@ -993,6 +1055,8 @@ module.exports = {
   collectMessageIds,
   collectRoomIds,
   collectGameNames,
+  buildReadingHistoryContext,
+  formatChapterRanges,
   loadGamesContext,
   loadForumContext,
   loadBooksContext,

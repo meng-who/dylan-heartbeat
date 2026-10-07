@@ -154,6 +154,68 @@ function readWakeArchive(options = {}) {
   return { records, unreadable, configured: true };
 }
 
+function collectReadingHistory(records = []) {
+  const books = new Map();
+  records.forEach((record, index) => {
+    const chapterNo = Number(record?.chapter_no || 0);
+    if (
+      record?.kind !== "activity"
+      || record?.status !== "success"
+      || (record?.source !== "books" && record?.action !== "book_reflect")
+      || !String(record?.book_id || "").trim()
+      || !Number.isSafeInteger(chapterNo)
+      || chapterNo < 1
+    ) return;
+
+    const bookId = String(record.book_id).trim();
+    const timestamp = Date.parse(record.created_at || "");
+    const recency = Number.isFinite(timestamp) ? timestamp : index;
+    const current = books.get(bookId) || {
+      bookId,
+      title: "",
+      chapters: new Set(),
+      lastReadAt: "",
+      recency: -1
+    };
+    current.chapters.add(chapterNo);
+    if (recency >= current.recency) {
+      current.title = String(record.book_title || current.title || bookId).trim().slice(0, 160);
+      current.lastReadAt = String(record.created_at || record.local_time || current.lastReadAt || "");
+      current.recency = recency;
+    }
+    books.set(bookId, current);
+  });
+
+  return [...books.values()]
+    .sort((left, right) => right.recency - left.recency)
+    .map(book => ({
+      bookId: book.bookId,
+      title: book.title || book.bookId,
+      chapters: [...book.chapters].sort((left, right) => left - right),
+      lastReadAt: book.lastReadAt
+    }));
+}
+
+function readReadingHistory(options = {}) {
+  const key = options.key || parseArchiveKey((options.env || process.env).WAKE_ARCHIVE_KEY);
+  if (!key) throw new Error("WAKE_ARCHIVE_KEY 无效或未配置");
+  const filePath = archiveFilePath(options.filePath);
+  let unreadable = 0;
+  const records = readArchiveLines(filePath).map(line => {
+    try {
+      return decryptArchiveLine(line, key);
+    } catch {
+      unreadable++;
+      return null;
+    }
+  }).filter(Boolean);
+  return {
+    books: collectReadingHistory(records),
+    unreadable,
+    configured: true
+  };
+}
+
 function writeLinesAtomic(filePath, lines) {
   const temporary = `${filePath}.tmp-${process.pid}-${Date.now()}`;
   const backup = `${filePath}.bak`;
@@ -199,9 +261,11 @@ module.exports = {
   archiveConfigured,
   archiveFilePath,
   buildWakeArchiveOutcome,
+  collectReadingHistory,
   decryptArchiveLine,
   deleteWakeArchiveRecord,
   encryptArchiveRecord,
   parseArchiveKey,
+  readReadingHistory,
   readWakeArchive
 };

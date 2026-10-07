@@ -404,6 +404,7 @@ ADMIN_SESSION_DAYS=180
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
 - `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`books`、`games` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。`forum` 只会潜水读取已加入的公开房间并把感受或回复草稿存入私人 Archive，绝不会自动加群或发言；为兼容旧部署，启用 `forum` 时也会同时提供只读书店活动。若只想读书、不想潜水，可单独填写 `books`。
+- Books Activity 会从加密 Archive 自动整理全部可识别的成功阅读记录，以 `book_id + chapter_no` 建立阅读履历。它优先续读最近读过且已有新章的书，并避开重复章节；模型只收到最多 10 本书的压缩章节范围和本轮正文，不注入旧读后感，也不增加模型请求次数。
 - `AUTONOMY_TEST_FORCE_GAME`：仅用于短期联调，可填 `fishing` 或 `garden_cat`。设置后跳过“是否行动”的模型选择，直接测试该游戏，因此整轮只调用一次模型做批量规划；验证成功后立即删除。
 - Games Activity 目前只开放 `fishing` 和 `garden_cat`。每轮第一次模型请求决定是否玩，第二次根据指南、状态和目录一次性规划最多 8 条命令；之后由程序机械执行，不再逐步调用模型。钓鱼命令会合并成一个批次，花园命令会按顺序执行。它不会调用 `account`、重开、导入导出或共享便签，逐步参数和返回都会加密写入 Archive。
 - 管理页登录默认保留 180 天，并使用适合手机从外部链接打开的 SameSite=Lax Cookie；可用 `ADMIN_SESSION_DAYS` 调整为 1-365 天。

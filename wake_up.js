@@ -12,7 +12,7 @@ const {
 } = require("./wake_guardrails");
 const { isSpecialEventContent } = require("./special_events");
 const { findSimilarRecentPush, getLatestSentPushTime, getRecentSentPushes } = require("./wake_dedup");
-const { appendWakeArchive, buildWakeArchiveOutcome } = require("./wake_archive");
+const { appendWakeArchive, buildWakeArchiveOutcome, readReadingHistory } = require("./wake_archive");
 const { runSoloCycle } = require("./solo_runtime");
 const {
   activityGate,
@@ -1107,6 +1107,25 @@ async function runActivityCheck() {
     ? normalizeContentToText(baseSystem.content).split("## Memories")[0].trim()
     : "";
 
+  let readingHistory = [];
+  if (enabledActions.includes("books")) {
+    try {
+      const reading = readReadingHistory();
+      readingHistory = reading.books;
+      console.log(JSON.stringify({
+        event: "activity_reading_history_loaded",
+        books: readingHistory.length,
+        chapters: readingHistory.reduce((total, book) => total + book.chapters.length, 0),
+        unreadable: reading.unreadable
+      }));
+    } catch (error) {
+      console.warn(JSON.stringify({
+        event: "activity_reading_history_unavailable",
+        error: error.message || String(error)
+      }));
+    }
+  }
+
   let result;
   let modelRequestCount = 0;
   let modelResponseCount = 0;
@@ -1138,6 +1157,7 @@ async function runActivityCheck() {
       systemPrompt,
       history,
       latestUserText: latestUserText ? normalizeContentToText(latestUserText.content) : "",
+      readingHistory,
       enabledActions,
       forceGame: process.env.AUTONOMY_TEST_FORCE_GAME,
       playlistName: process.env.SPOTIFY_PLAYLIST_NAME || "自主收藏",
