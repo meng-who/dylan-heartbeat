@@ -77,6 +77,8 @@ test("places the Solo contract after chat and memory material", () => {
   assert.ok(messages[1].content.lastIndexOf("只输出下面这一份标签结果") > messages[1].content.lastIndexOf("回来啦"));
   assert.match(messages[1].content, /不是给用户的聊天回复/);
   assert.match(messages[1].content, /至少三处身体感受/);
+  assert.match(messages[1].content, /想象场景只是脑内伴随层/);
+  assert.match(messages[1].content, /现实中的独处动作/);
   assert.match(messages[1].content, /<solo_narrative>/);
 });
 
