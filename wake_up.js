@@ -1040,6 +1040,7 @@ async function runActivityCheck() {
   if (enabledActions.includes("ombre")) required.push("OMBRE_MCP_URL", "OMBRE_MCP_TOKEN");
   if (enabledActions.includes("forum") || enabledActions.includes("books")) required.push("FORUM_MCP_URL");
   if (enabledActions.includes("games")) required.push("GAMES_MCP_URL");
+  if (enabledActions.includes("question_box")) required.push("NOTION_TOKEN", "NOTION_QUESTION_BOX_PAGE_ID");
   if (!enabledActions.length) {
     console.warn(JSON.stringify({ event: "activity_config_missing", variables: ["AUTONOMY_ACTIONS"] }));
     return { ran: false, reason: "not_configured" };
@@ -1176,7 +1177,13 @@ async function runActivityCheck() {
       forumToken: process.env.FORUM_MCP_TOKEN,
       forumTimeoutMs: readPositiveTimeout("FORUM_MCP_TIMEOUT_MS", 20_000),
       gamesUrl: process.env.GAMES_MCP_URL,
-      gamesTimeoutMs: readPositiveTimeout("GAMES_MCP_TIMEOUT_MS", 20_000)
+      gamesTimeoutMs: readPositiveTimeout("GAMES_MCP_TIMEOUT_MS", 20_000),
+      notionToken: process.env.NOTION_TOKEN,
+      notionQuestionBoxPageId: process.env.NOTION_QUESTION_BOX_PAGE_ID,
+      notionApiBase: process.env.NOTION_API_BASE,
+      notionVersion: process.env.NOTION_VERSION,
+      notionTimeoutMs: readPositiveTimeout("NOTION_TIMEOUT_MS", 20_000),
+      timeZone: TIME_ZONE
     });
     if (result.trackUri && result.status === "success") {
       nextState.recent_track_uris.push(result.trackUri);
@@ -1257,6 +1264,8 @@ async function runActivityCheck() {
     game_name: result.gameName || result.decision?.game || "",
     game_steps: Array.isArray(result.gameSteps) ? result.gameSteps : [],
     game_outcome: result.gameOutcome || "",
+    question_box_action: result.questionBoxAction || "",
+    question_id: result.questionId || result.decision?.questionId || "",
     reason: result.reason || "",
     failure_kind: result.failureKind || "",
     model_request_count: modelRequestCount,

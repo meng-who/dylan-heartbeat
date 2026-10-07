@@ -147,7 +147,9 @@ function readWakeArchive(options = {}) {
       record.book_id,
       record.book_title,
       record.room_id,
-      record.reply_to_message_id
+      record.reply_to_message_id,
+      record.question_id,
+      record.question_box_action
     ].some(value => String(value || "").toLowerCase().includes(query));
   }).slice(0, limit);
 

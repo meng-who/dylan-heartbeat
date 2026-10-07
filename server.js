@@ -34,6 +34,7 @@ const {
   requestTraceId
 } = require("./http_resilience");
 const { RemoteMcpClient } = require("./remote_mcp_client");
+const { NotionQuestionBox } = require("./notion_question_box");
 const { authorizeAdmin, buildAdminSessionCookie } = require("./admin_auth");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
@@ -1461,6 +1462,8 @@ function archivePageHtml() {
       if (item.reply_to_message_id) details.push("留意消息：" + item.reply_to_message_id);
       if (item.game_name) details.push("游戏：" + item.game_name);
       if (item.game_outcome) details.push("结果：" + item.game_outcome);
+      if (item.question_id) details.push("提问箱：" + item.question_id);
+      if (item.question_box_action) details.push("提问箱动作：" + item.question_box_action);
       if (item.kind === "activity") {
         if (Number.isFinite(Number(item.model_request_count))) {
           const requestCount = Math.max(0, Number(item.model_request_count));
@@ -1580,6 +1583,46 @@ app.get("/admin/archive/export", { preHandler: basicAuth }, async (req, reply) =
     .send(content);
 });
 
+// Read-only connection check: it reads Question Box blocks but never changes the Notion page.
+app.get("/admin/activity/notion-test", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  if (!process.env.NOTION_TOKEN || !process.env.NOTION_QUESTION_BOX_PAGE_ID) {
+    return reply.code(503).send({
+      ok: false,
+      error: "NOTION_TOKEN 或 NOTION_QUESTION_BOX_PAGE_ID 未配置"
+    });
+  }
+  try {
+    const questionBox = new NotionQuestionBox({
+      token: process.env.NOTION_TOKEN,
+      pageId: process.env.NOTION_QUESTION_BOX_PAGE_ID,
+      apiBase: process.env.NOTION_API_BASE,
+      version: process.env.NOTION_VERSION,
+      timeoutMs: Number(process.env.NOTION_TIMEOUT_MS) || 20_000,
+      timeZone: resolveTimeZone()
+    });
+    const snapshot = await questionBox.read();
+    const summarize = card => ({
+      id: card.id,
+      from: card.from,
+      question: card.question.slice(0, 500),
+      answered: card.answered,
+      answer: card.answer.slice(0, 500),
+      afterword: card.afterword.slice(0, 500)
+    });
+    return {
+      ok: true,
+      page_id: process.env.NOTION_QUESTION_BOX_PAGE_ID,
+      total: snapshot.cards.length,
+      pending: snapshot.pending.map(summarize),
+      next_question_id: snapshot.nextQuestionId,
+      latest: snapshot.cards.slice(-6).reverse().map(summarize)
+    };
+  } catch (error) {
+    req.log.error({ event: "notion_question_box_test_failed", error: error.message });
+    return reply.code(502).send({ ok: false, error: error.message });
+  }
+});
 // Read-only connection check: it initializes MCP and lists tools, but never calls a Spotify tool.
 app.get("/admin/activity/spotify-test", { preHandler: basicAuth }, async (req, reply) => {
   setArchivePrivacyHeaders(reply);
