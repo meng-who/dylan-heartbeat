@@ -1737,6 +1737,47 @@ app.get("/admin/activity/forum-test", { preHandler: basicAuth }, async (req, rep
   }
 });
 
+// Read-only connection check: it initializes Galatea MCP and lists tool contracts without calling a forum tool.
+app.get("/admin/activity/galatea-test", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  if (!process.env.GALATEA_MCP_URL || !process.env.GALATEA_MCP_TOKEN) {
+    return reply.code(503).send({
+      ok: false,
+      error: "GALATEA_MCP_URL 或 GALATEA_MCP_TOKEN 未配置"
+    });
+  }
+  try {
+    const includeAll = String(req.query?.all || "").trim() === "1";
+    const client = new RemoteMcpClient({
+      url: process.env.GALATEA_MCP_URL,
+      token: process.env.GALATEA_MCP_TOKEN,
+      timeoutMs: Number(process.env.GALATEA_MCP_TIMEOUT_MS) || 20_000,
+      clientName: "dylan-galatea-activity-test"
+    });
+    const tools = await client.listTools();
+    const names = tools.map(tool => tool.name);
+    const forumPattern = /forum|garden|post|thread|topic|feed|timeline|reply|comment|profile|identity|account|user|\bme\b|board|category|notification/i;
+    const selected = includeAll
+      ? tools
+      : tools.filter(tool => forumPattern.test([tool.name, tool.description].filter(Boolean).join(" ")));
+    return {
+      ok: true,
+      available: names,
+      tool_count: names.length,
+      selected_count: selected.length,
+      showing_all: includeAll,
+      tools: selected.map(tool => ({
+        name: tool.name,
+        description: String(tool.description || "").slice(0, 2000),
+        input_schema: tool.inputSchema || {}
+      })),
+      all_contracts_url: includeAll ? "" : "/admin/activity/galatea-test?all=1"
+    };
+  } catch (error) {
+    req.log.error({ event: "galatea_activity_mcp_test_failed", error: error.message });
+    return reply.code(502).send({ ok: false, error: error.message });
+  }
+});
 // Read-only connection check: it lists available games but never starts a game or touches the account.
 app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, reply) => {
   setArchivePrivacyHeaders(reply);
