@@ -313,7 +313,8 @@ function saveTimeline(messages) {
   );
   const maxActivityEvents = readPositiveIntegerEnv("MAX_INJECTED_ACTIVITY_EVENTS", 8);
   const maxSoloEvents = readPositiveIntegerEnv("MAX_INJECTED_SOLO_EVENTS", 4);
-  const maxSpecialEvents = Math.max(maxPushEvents + maxActivityEvents + maxSoloEvents, 20);
+  const maxDreamEvents = readPositiveIntegerEnv("MAX_INJECTED_DREAM_EVENTS", 2);
+  const maxSpecialEvents = Math.max(maxPushEvents + maxActivityEvents + maxSoloEvents + maxDreamEvents, 20);
   const final = retainTimelineMessages(messages, {
     maxRealMessages: maxTimelineMessages,
     maxSpecialEvents,
@@ -528,6 +529,7 @@ function selectAutomationEvents(events) {
   );
   const maxActivityEvents = readPositiveIntegerEnv("MAX_INJECTED_ACTIVITY_EVENTS", 8);
   const maxSoloEvents = readPositiveIntegerEnv("MAX_INJECTED_SOLO_EVENTS", 4);
+  const maxDreamEvents = readPositiveIntegerEnv("MAX_INJECTED_DREAM_EVENTS", 2);
   const indexedEvents = events.map((event, index) => ({ event, index }));
   const recentPushEvents = indexedEvents
     .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "push")
@@ -538,7 +540,10 @@ function selectAutomationEvents(events) {
   const recentSoloEvents = indexedEvents
     .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "solo")
     .slice(-maxSoloEvents);
-  const selectedIndexes = new Set([...recentPushEvents, ...recentActivityEvents, ...recentSoloEvents].map(({ index }) => index));
+  const recentDreamEvents = indexedEvents
+    .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "dream")
+    .slice(-maxDreamEvents);
+  const selectedIndexes = new Set([...recentPushEvents, ...recentActivityEvents, ...recentSoloEvents, ...recentDreamEvents].map(({ index }) => index));
   const selectedEvents = indexedEvents
     .filter(({ index }) => selectedIndexes.has(index))
     .map(({ event }) => event);
@@ -555,7 +560,7 @@ function addAutomationEventContext(messages, events) {
   const note = [
     "[Dylan 自动化内部记录]",
     "以下内容由自动化程序生成，不是用户发送或展示给你的消息。",
-    "它用于帮助你记住自己此前是否尝试推送、Solo 独处的概要，以及成功完成过哪些自主活动；不要把它归因于用户。",
+    "它用于帮助你记住自己此前是否尝试推送、Solo 独处的概要，成功完成过哪些自主活动，以及梦境概要；不要把它归因于用户。梦境不是现实经历。",
     eventLog,
     "[/Dylan 自动化内部记录]"
   ].join("\n");
@@ -1298,7 +1303,7 @@ function archivePageHtml() {
     <header>
       <div>
         <h1>Dylan Archive</h1>
-        <p>自动唤醒、Solo 与自主活动记录。档案在磁盘中始终加密保存。</p>
+        <p>自动唤醒、Solo、自主活动与梦境记录。档案在磁盘中始终加密保存。</p>
       </div>
       <div class="actions">
         <a class="button" href="/admin">返回管理页</a>
@@ -1312,6 +1317,7 @@ function archivePageHtml() {
         <option value="wake">主动推送</option>
         <option value="solo">Solo</option>
         <option value="activity">自主活动</option>
+        <option value="dream">梦境</option>
       </select>
       <select id="status" aria-label="筛选结果">
         <option value="">全部结果</option>
@@ -1325,6 +1331,7 @@ function archivePageHtml() {
         <option value="not_sent">未发送</option>
         <option value="kept_private">留在心里</option>
         <option value="success">行动成功</option>
+        <option value="completed">梦境完成</option>
         <option value="failed">行动失败</option>
         <option value="skipped">已跳过</option>
       </select>
@@ -1343,7 +1350,7 @@ function archivePageHtml() {
       push_failed: "推送失败", no_action: "AI 选择不发送",
       diary_only: "只写日记", empty: "空回复", not_sent: "未发送",
       kept_private: "留在心里", success: "行动成功",
-      failed: "行动失败", skipped: "已跳过"
+      failed: "行动失败", skipped: "已跳过", completed: "梦境完成"
     };
     const query = document.getElementById("query");
     const kind = document.getElementById("kind");
@@ -1396,13 +1403,15 @@ function archivePageHtml() {
     function renderRecord(item) {
       const article = node("article", "record");
       const head = node("div", "record-head");
-      const kindLabels = { wake: "主动推送", solo: "Solo", activity: "自主活动" };
+      const kindLabels = { wake: "主动推送", solo: "Solo", activity: "自主活动", dream: "梦境" };
       head.append(node("span", "kind", kindLabels[item.kind || "wake"] || item.kind));
       head.append(node("span", "status status-" + item.status, labels[item.status] || item.status));
       head.append(node("time", "", item.local_time || item.created_at || "未知时间"));
       head.append(node("span", "model", item.model || "未知模型"));
       article.append(head);
       if (item.kind === "solo" && item.summary) appendArchiveText(article, "candidate", item.summary, "查看完整摘要");
+      if (item.kind === "dream" && item.summary) appendArchiveText(article, "candidate", item.summary, "查看梦境概要");
+      if (item.kind === "dream" && item.dream) appendArchiveText(article, "final", item.dream, "查看完整梦境");
       if (item.kind === "activity") {
         const wasExecuted = item.status === "success";
         const summaryLabel = wasExecuted
