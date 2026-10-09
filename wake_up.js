@@ -1009,6 +1009,7 @@ async function runSoloCheck() {
     mode: result.mode || null,
     recall_used: Boolean(result.recallUsed),
     notify_wanted: Boolean(result.notifyWanted),
+    notify_suppressed_reason: result.notifySuppressedReason || null,
     notified: Boolean(result.notified),
     archived: Boolean(result.archived)
   }));

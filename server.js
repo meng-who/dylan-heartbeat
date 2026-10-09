@@ -1446,6 +1446,11 @@ function archivePageHtml() {
       }
       const details = [];
       if (item.reason) details.push("原因：" + item.reason);
+      if (item.kind === "solo" && item.notify_suppressed_reason) {
+        const reasons = { english_voice_style: "英文口播式文本", empty_after_voice_cue_cleanup: "清除语气标签后没有正文" };
+        details.push("推送未发送：" + (reasons[item.notify_suppressed_reason] || item.notify_suppressed_reason));
+      }
+      if (item.kind === "solo" && item.notify_repairs?.includes("voice_cues_removed")) details.push("推送中的语气标签已清除");
       if (Array.isArray(item.attempted_models) && item.attempted_models.length) {
         details.push("尝试模型：" + item.attempted_models.join(" → "));
       }

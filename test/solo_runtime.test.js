@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { buildSoloMessages, formatRecentHistory, parseSoloResult, runSoloCycle } = require("../solo_runtime");
+const { buildSoloMessages, formatRecentHistory, parseSoloResult, runSoloCycle, sanitizeSoloNotification } = require("../solo_runtime");
 
 test("parses a bounded Solo decision and keeps the controller-selected mode", () => {
   const result = parseSoloResult(JSON.stringify({
@@ -80,6 +80,8 @@ test("places the Solo contract after chat and memory material", () => {
   assert.match(messages[1].content, /想象场景只是脑内伴随层/);
   assert.match(messages[1].content, /现实中的独处动作/);
   assert.match(messages[1].content, /<solo_narrative>/);
+  assert.match(messages[1].content, /普通手机文字推送/);
+  assert.match(messages[1].content, /方括号语气标签/);
 });
 
 test("does not archive malformed JSON as visible Solo prose", () => {
@@ -229,4 +231,72 @@ test("marks malformed model output as technical without regenerating it", async 
   assert.equal(archivedFailure.error_code, "invalid_model_output");
   assert.equal(archivedFailure.summary, "独处尝试未完成");
   assert.equal(modelCalls, 1);
+});
+
+test("cleans voice cues from a Chinese Solo text push", () => {
+  const notify = sanitizeSoloNotification({ send: true, title: "[softly] 想你", body: "[sighs] 刚刚忽然很想你。" });
+  assert.equal(notify.send, true);
+  assert.equal(notify.title, "想你");
+  assert.equal(notify.body, "刚刚忽然很想你。");
+  assert.deepEqual(notify.repairs, ["voice_cues_removed"]);
+  assert.equal(notify.suppressedReason, "");
+});
+
+test("keeps Chinese Solo pushes with English proper names", () => {
+  const notify = sanitizeSoloNotification({ send: true, title: "给你", body: "刚刚听到 Spotify 里那首歌，想起你了。" });
+  assert.equal(notify.send, true);
+  assert.match(notify.body, /Spotify/);
+});
+
+test("does not send an English voice-style Solo notification", async () => {
+  let pushCalls = 0;
+  let archived;
+  let completed;
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (String(url).endsWith("/api/solo/claim")) {
+      return Response.json({ claimed: true, claim: { id: "c", startedAt: 1000, mode: "fantasy", chord: "温情", desire: 0.8 } });
+    }
+    if (String(url) === "https://model.example.com/chat") {
+      return Response.json({ choices: [{ message: { content: JSON.stringify({
+        mode: "fantasy", intensity: 0.7, summary: "独处完了", narrative: "我独自待了一会儿。",
+        notify: { send: true, title: "For you", body: "[softly] I miss you and wish you were here." }
+      }) } }] });
+    }
+    if (String(url).endsWith("/api/solo/complete")) {
+      completed = body;
+      return Response.json({ completed: true });
+    }
+    throw new Error("unexpected URL " + url);
+  };
+  const result = await runSoloCycle({
+    pulseBaseUrl: "https://pulse.example.com", pulseClientKey: "p",
+    apiUrl: "https://model.example.com/chat", apiKey: "k", model: "m",
+    lastUserAt: 0, messages: [], systemPrompt: "AI", getLatestUserAt: async () => 0,
+    sendPush: async () => { pushCalls += 1; return { ok: true }; },
+    archiveSolo: async record => { archived = record; return { saved: true }; },
+    fetchImpl
+  });
+  assert.equal(pushCalls, 0);
+  assert.equal(result.notifyWanted, false);
+  assert.equal(result.notified, false);
+  assert.equal(result.notifySuppressedReason, "english_voice_style");
+  assert.equal(completed.notifyWanted, false);
+  assert.equal(completed.notified, false);
+  assert.equal(archived.status, "kept_private");
+  assert.equal(archived.notify_wanted, true);
+  assert.equal(archived.notify_suppressed_reason, "english_voice_style");
+  assert.equal(archived.final_body, "");
+});
+
+test("blocks a short English Solo line and cleans other stage cues", () => {
+  const shortEnglish = sanitizeSoloNotification({ send: true, title: "想你", body: "[gently] I miss you." });
+  assert.equal(shortEnglish.send, false);
+  assert.equal(shortEnglish.suppressedReason, "english_voice_style");
+
+  const Chinese = sanitizeSoloNotification({ send: true, title: "For you", body: "[gently] 想你了。" });
+  assert.equal(Chinese.send, true);
+  assert.equal(Chinese.title, "来自AI");
+  assert.equal(Chinese.body, "想你了。");
+  assert.deepEqual(Chinese.repairs, ["voice_cues_removed", "english_title_replaced"]);
 });
