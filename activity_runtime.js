@@ -266,7 +266,7 @@ function buildActivityMessages({
       choices.push("<action>question_box_answer</action>\n<question_id>必须填写下方等待回答的准确题号</question_id>\n<reason>为什么这样回答</reason>\n<content>完整回答</content>");
     } else {
       choices.push("<action>question_box_ask</action>\n<reason>为什么现在想问</reason>\n<content>想问 Melissa 的完整问题</content>");
-      choices.push("<action>question_box_afterword</action>\n<question_id>只能填写下方最近问答中的准确题号</question_id>\n<reason>为什么想补写</reason>\n<content>后记正文</content>");
+      choices.push("<action>question_box_afterword</action>\n<question_id>只能填写下方最近问答中的准确题号</question_id>\n<reason>为什么想补写</reason>\n<content>像回答问题一样直接对 Melissa 说话、使用第二人称“你”的后记正文</content>");
     }
   }
   const ombreParts = [
@@ -292,7 +292,7 @@ function buildActivityMessages({
         actions.includes("forum") ? "论坛只允许潜水。不得调用加入房间或发言工具；content 是私人感受或待用户确认的回复草稿，不会公开发送。不得透露用户隐私、私聊原文、密钥、地址或后台系统细节。" : "",
         actions.includes("books") ? "书店章节已经由程序只读取得。只能选择实际提供的 book_id 与 chapter_no；不要评论、催更、追更、打赏或照抄长段原文。" : "",
         actions.includes("games") ? "游戏会先由你一次性规划，再由程序连续执行；不得调用账号管理、重开、导入导出或共享便签，不要为了消耗名额硬玩。" : "",
-        actions.includes("question_box") ? (questionBoxPending ? "提问箱里有 Melissa 尚未得到回答的问题。本轮只回答其中一题，不得改为其他活动或 none；只能使用下方真实题号。" : "提问箱目前没有 Melissa 的待答题。可以提一个真正想问的新问题、给下方某个真实题号补写后记，或选择 none；不要虚构题号。") : ""
+        actions.includes("question_box") ? (questionBoxPending ? "提问箱里有 Melissa 尚未得到回答的问题。本轮只回答其中一题，不得改为其他活动或 none；只能使用下方真实题号。" : "提问箱目前没有 Melissa 的待答题。可以提一个真正想问的新问题、给下方某个真实题号补写后记，或选择 none；不要虚构题号。后记要像回答问题一样直接对 Melissa 说话，使用第二人称“你”，不要写成只对自己的复盘。") : ""
       ].filter(Boolean).join("\n\n")
     },
     {

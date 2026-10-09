@@ -199,6 +199,8 @@ test("when no question is pending the model can append an afterword with one mod
   assert.equal(result.questionBoxAction, "afterword");
   assert.equal(result.questionId, "Q-001");
   assert.equal(mock.modelCalls, 1);
+  const modelMessages = mock.calls.find(call => call.url.includes("model.test")).body.messages;
+  assert.match(modelMessages.map(message => message.content).join("\n"), /第二人称“你”/);
   const append = mock.calls.find(call => call.method === "PATCH" && call.url.includes("/q1/children"));
   assert.match(JSON.stringify(append.body), /现在回看/);
 });
