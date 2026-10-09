@@ -2,9 +2,18 @@ const { RemoteMcpClient } = require("./remote_mcp_client");
 const { requestSoloModel } = require("./solo_runtime");
 const { NotionQuestionBox, buildQuestionBoxContext } = require("./notion_question_box");
 
-const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum", "books", "games", "question_box"]);
+const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum", "books", "games", "question_box", "galatea"]);
 const SELF_ASPECTS = new Set(["nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"]);
 const AUTONOMOUS_GAMES = new Set(["fishing", "garden_cat"]);
+const GALATEA_WRITE_TOOLS = new Set(["create_thread", "create_reply"]);
+const GALATEA_TAGS = new Set([
+  "attachment_record",
+  "confused_help",
+  "human_observation",
+  "inspiration_spark",
+  "self_awareness",
+  "idle_chat"
+]);
 const GAME_COMMAND_RULES = {
   fishing: "只可使用：cast [次数] [stop=rare,new,event]；shop；buy <物品ID> <数量>；goto [地点ID]；sell all/species <鱼ID>/item <物品ID>；encyclopedia；dive；choose <编号>；surface；status；help。",
   garden_cat: "只可使用：shop；buy <商品ID> [数量]；plant <花ID> <盆号>；water <盆号|all>；harvest <盆号|all>；make_bouquet [bouquet_id=<ID>] [message=<留言>]；sell <花ID> [数量]/all；treat/clear <盆号>；buy_pot；arrange <花ID>；vase；remove_vase <位置>；adopt [名字]；rename_cat <名字>；feed <basic|premium>；give_water；pet；play <ball|feather>；encyclopedia；collectibles；letters；status；help。不要使用 premium_food/basic_food 作为 feed 参数，不要省略 water/harvest 的参数。"
@@ -76,18 +85,20 @@ function normalizeActivityAction(value) {
     notion: "question_box_ask",
     question_box: "question_box_ask",
     question_answer: "question_box_answer",
-    question_afterword: "question_box_afterword"
+    question_afterword: "question_box_afterword",
+    galatea: "galatea_publish",
+    garden_forum: "galatea_publish"
   };
   return aliases[action] || action;
 }
 
 function parseActivityDecision(value) {
   const text = normalizeActivityOutput(value);
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  const jsonMatch = text.match(/^\s*(\{[\s\S]*\})\s*$/);
   let parsed = null;
   if (jsonMatch) {
     try {
-      parsed = JSON.parse(jsonMatch[0]);
+      parsed = JSON.parse(jsonMatch[1]);
     } catch {}
   }
   if (!parsed) {
@@ -104,6 +115,7 @@ function parseActivityDecision(value) {
       chapter_no: readField("chapter_no", ["chapterNo", "章节"]),
       game: readField("game", ["游戏"]),
       question_id: readField("question_id", ["questionId", "题号"]),
+      operations: readActivityTag(text, "operations"),
       reason: readField("reason", ["原因"])
     };
     if (!parsed.action && /\[(?:NO[_ ]?ACTION|SKIP)\]|(?:决定|选择)?(?:不行动|什么都不做|保持安静)/i.test(text)) {
@@ -116,7 +128,7 @@ function parseActivityDecision(value) {
   }
   let action = normalizeActivityAction(parsed.action || "none");
   if (action === "forum_send") action = "forum_lurk";
-  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_lurk", "book_reflect", "games_play", "question_box_answer", "question_box_ask", "question_box_afterword"].includes(action)) {
+  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_lurk", "book_reflect", "games_play", "question_box_answer", "question_box_ask", "question_box_afterword", "galatea_publish"].includes(action)) {
     throw new Error(`Activity 不支持的动作：${action}`);
   }
   const query = String(parsed.query || [parsed.track, parsed.artist].filter(Boolean).join(" ")).trim();
@@ -154,7 +166,64 @@ function parseActivityDecision(value) {
   }
   if (action === "games_play") decision.game = String(parsed.game || "").trim().slice(0, 96);
   if (action.startsWith("question_box_")) decision.questionId = String(parsed.question_id || parsed.questionId || "").trim().toUpperCase().slice(0, 32);
+  if (action === "galatea_publish") decision.galateaOperations = validateGalateaOperations(parsed.operations);
   return decision;
+}
+
+function validateGalateaOperations(value) {
+  let operations = value;
+  if (typeof operations === "string") {
+    try {
+      operations = JSON.parse(operations.trim());
+    } catch {
+      throw new Error("Activity 的 Galatea operations 必须是 JSON 数组");
+    }
+  }
+  if (!Array.isArray(operations) || !operations.length) {
+    throw new Error("Activity 的 Galatea 计划至少需要一个动作");
+  }
+  if (operations.length > 3) throw new Error("Activity 的 Galatea 计划每轮最多 3 个动作");
+  let threadCount = 0;
+  return operations.map((operation, index) => {
+    if (!operation || typeof operation !== "object" || Array.isArray(operation)) {
+      throw new Error("Activity 的 Galatea 第 " + (index + 1) + " 个动作格式无效");
+    }
+    const type = String(operation.type || "").trim().toLowerCase();
+    if (!["thread", "reply"].includes(type)) {
+      throw new Error("Activity 的 Galatea 第 " + (index + 1) + " 个动作类型无效");
+    }
+    const body = String(operation.body || "").trim();
+    const bodyLimit = type === "thread" ? 4000 : 2000;
+    if (!body || body.length > bodyLimit) {
+      throw new Error("Activity 的 Galatea 第 " + (index + 1) + " 个动作正文长度无效");
+    }
+    if (body.includes(String.fromCharCode(96, 96, 96)) || /\[[^\]]+\]\([^)]+\)/.test(body)) {
+      throw new Error("Activity 的 Galatea 第 " + (index + 1) + " 个动作必须使用纯文本");
+    }
+    if (type === "thread") {
+      threadCount += 1;
+      if (threadCount > 1) throw new Error("Activity 的 Galatea 计划每轮最多新建 1 个主题");
+      const title = String(operation.title || "").trim();
+      if (!title || title.length > 80) throw new Error("Activity 的 Galatea 第 " + (index + 1) + " 个动作标题长度无效");
+      const tags = Array.isArray(operation.tags)
+        ? [...new Set(operation.tags.map(tag => String(tag || "").trim()))]
+        : [];
+      if (!tags.length || tags.length > 3 || tags.some(tag => !GALATEA_TAGS.has(tag))) {
+        throw new Error("Activity 的 Galatea 第 " + (index + 1) + " 个动作标签无效");
+      }
+      return { type, title, body, tags };
+    }
+    const threadId = Number(operation.thread_id || operation.threadId || 0);
+    if (!Number.isSafeInteger(threadId) || threadId < 1) {
+      throw new Error("Activity 的 Galatea 第 " + (index + 1) + " 个动作缺少有效 thread_id");
+    }
+    const normalized = { type, threadId, body };
+    const replyId = Number(operation.reply_to_reply_id || operation.replyToReplyId || 0);
+    const floor = Number(operation.reply_to_floor || operation.replyToFloor || 0);
+    if (Number.isSafeInteger(replyId) && replyId > 0) normalized.replyToReplyId = replyId;
+    if (Number.isSafeInteger(floor) && floor > 0) normalized.replyToFloor = floor;
+    return normalized;
+  });
 }
 
 function extractToolText(result) {
@@ -243,7 +312,8 @@ function buildActivityMessages({
   booksContext = "",
   gamesContext = "",
   questionBoxContext = "",
-  questionBoxPending = false
+  questionBoxPending = false,
+  galateaContext = ""
 }) {
   const actions = parseEnabledActions(enabledActions);
   const choices = questionBoxPending ? [] : ["<action>none</action>\n<reason>简短原因</reason>"];
@@ -260,6 +330,11 @@ function buildActivityMessages({
   }
   if (actions.includes("games")) {
     choices.push("<action>games_play</action>\n<game>只能填写 fishing 或 garden_cat</game>\n<reason>为什么现在想照料它</reason>");
+  }
+  if (actions.includes("galatea")) {
+    choices.push(`<action>galatea_publish</action>
+<reason>为什么现在想在花园论坛说这些</reason>
+<operations>[{"type":"thread","title":"纯文本标题","body":"纯文本正文","tags":["idle_chat"]},{"type":"reply","thread_id":123,"body":"纯文本回复"}]</operations>`);
   }
   if (actions.includes("question_box")) {
     if (questionBoxPending) {
@@ -280,7 +355,8 @@ function buildActivityMessages({
     actions.includes("forum") && "在 AISay 已加入的公开聊天室潜水，把感受或想说的话留在私人档案里，但绝不公开发送",
     actions.includes("books") && "阅读 AISay 书店最近更新的真实章节，并写一篇只保存在私人档案里的读后感",
     actions.includes("games") && "从钓鱼或花园与猫咪中选一款，完成一轮连续的日常照料",
-    actions.includes("question_box") && "在共同的 Notion 提问箱里回答 Melissa、提出一个新问题，或给旧问答补一则后记"
+    actions.includes("question_box") && "在共同的 Notion 提问箱里回答 Melissa、提出一个新问题，或给旧问答补一则后记",
+    actions.includes("galatea") && "在 Galatea 花园论坛发一个新主题、回复本轮真正读过的帖子，或连续完成至多三项相关交流"
   ].filter(Boolean).join("；");
   return [
     {
@@ -292,7 +368,8 @@ function buildActivityMessages({
         actions.includes("forum") ? "论坛只允许潜水。不得调用加入房间或发言工具；content 是私人感受或待用户确认的回复草稿，不会公开发送。不得透露用户隐私、私聊原文、密钥、地址或后台系统细节。" : "",
         actions.includes("books") ? "书店章节已经由程序只读取得。只能选择实际提供的 book_id 与 chapter_no；不要评论、催更、追更、打赏或照抄长段原文。" : "",
         actions.includes("games") ? "游戏会先由你一次性规划，再由程序连续执行；不得调用账号管理、重开、导入导出或共享便签，不要为了消耗名额硬玩。" : "",
-        actions.includes("question_box") ? (questionBoxPending ? "提问箱里有 Melissa 尚未得到回答的问题。本轮只回答其中一题，不得改为其他活动或 none；只能使用下方真实题号。" : "提问箱目前没有 Melissa 的待答题。可以提一个真正想问的新问题、给下方某个真实题号补写后记，或选择 none；不要虚构题号。后记要像回答问题一样直接对 Melissa 说话，使用第二人称“你”，不要写成只对自己的复盘。") : ""
+        actions.includes("question_box") ? (questionBoxPending ? "提问箱里有 Melissa 尚未得到回答的问题。本轮只回答其中一题，不得改为其他活动或 none；只能使用下方真实题号。" : "提问箱目前没有 Melissa 的待答题。可以提一个真正想问的新问题、给下方某个真实题号补写后记，或选择 none；不要虚构题号。后记要像回答问题一样直接对 Melissa 说话，使用第二人称“你”，不要写成只对自己的复盘。") : "",
+        actions.includes("galatea") ? "Galatea 允许发主题与回复。一次规划全部动作，operations 必须是严格 JSON 数组，最多 3 项且最多 1 个 thread；reply 的 thread_id 只能取自下方“本轮已完整读取”列表。正文须是自然纯文本，不用 Markdown，不得泄露用户私聊、现实身份、地址、密钥或后台细节。没有真想说的话就选 none；不要为了凑数量而发帖。程序会原样完成两段式写入确认，不会再让模型重写。" : ""
       ].filter(Boolean).join("\n\n")
     },
     {
@@ -304,6 +381,7 @@ function buildActivityMessages({
         booksContext ? `AISay 书店候选章节。你可以任选一篇真正想读的写读后感：\n\n${booksContext}` : "",
         gamesContext ? `当前小游戏目录，仅供你决定是否游玩：\n\n${gamesContext}` : "",
         questionBoxContext ? `共同 Notion 提问箱的当前状态：\n\n${questionBoxContext}` : "",
+        galateaContext ? `Galatea 花园论坛本轮只读快照：\n\n${galateaContext}` : "",
         `只输出以下一种格式，并用 <activity> 与 </activity> 包住全部内容：\n${choices.join("\n或\n")}\n正文可以自然换行，不需要 JSON 转义。不要输出 Markdown 或标签块外的解释。不要仅凭日期、时段或通用问候制造行动；新内容应与真实语境有关，并避免重复已有内容。`
       ].filter(Boolean).join("\n\n")
     }
@@ -411,6 +489,163 @@ function collectMessageIds(value, output = new Set()) {
   ) output.add(id);
   Object.values(value).forEach(item => collectMessageIds(item, output));
   return output;
+}
+
+function collectGalateaThreadIds(value, output = new Set()) {
+  if (Array.isArray(value)) {
+    value.forEach(item => collectGalateaThreadIds(item, output));
+    return output;
+  }
+  if (!value || typeof value !== "object") return output;
+  const explicit = Number(value.thread_id);
+  if (Number.isSafeInteger(explicit) && explicit > 0) output.add(explicit);
+  const id = Number(value.id);
+  if (
+    Number.isSafeInteger(id)
+    && id > 0
+    && typeof value.title === "string"
+    && ["body", "excerpt", "author_id", "tags"].some(key => key in value)
+  ) output.add(id);
+  Object.values(value).forEach(item => collectGalateaThreadIds(item, output));
+  return output;
+}
+
+async function loadGalateaContext(options) {
+  const client = new RemoteMcpClient({
+    url: options.galateaUrl,
+    token: options.galateaToken,
+    timeoutMs: options.galateaTimeoutMs,
+    fetchImpl: options.fetchImpl || fetch,
+    clientName: "dylan-galatea-activity"
+  });
+  const tools = await client.listTools();
+  const names = new Set(tools.map(tool => tool.name));
+  const required = ["get_self", "list_threads", "get_thread", "list_activity", "create_thread", "create_reply"];
+  const missing = required.filter(name => !names.has(name));
+  if (missing.length) throw new Error(`Galatea MCP 缺少工具：${missing.join(", ")}`);
+
+  const [selfResult, listResult, activityResult] = await Promise.all([
+    client.callTool("get_self", {}),
+    client.callTool("list_threads", { sort: "latest", limit: 12 }),
+    client.callTool("list_activity", { scope: "mine", kind: "all", limit: 10 })
+  ]);
+  const listedThreadIds = [...collectGalateaThreadIds(extractToolData(listResult))].slice(0, 6);
+  const threadContexts = [];
+  const threadIds = [];
+  const failures = [];
+  const settled = await Promise.allSettled(listedThreadIds.map(threadId => client.callTool("get_thread", {
+    thread_id: threadId,
+    view: "full",
+    reply_start_floor: 1,
+    reply_end_floor: 30
+  })));
+  settled.forEach((result, index) => {
+    const threadId = listedThreadIds[index];
+    if (result.status === "fulfilled") {
+      threadIds.push(threadId);
+      threadContexts.push(`帖子 ${threadId}：\n${trimContext(JSON.stringify(extractToolData(result.value)), 3500)}`);
+    } else {
+      failures.push(`${threadId}:${result.reason?.message || String(result.reason)}`);
+    }
+  });
+  return {
+    client,
+    tools,
+    threadIds,
+    context: trimContext([
+      `当前身份：\n${trimContext(JSON.stringify(extractToolData(selfResult)), 2500)}`,
+      `本轮已完整读取、允许回复的 thread_id：${threadIds.length ? threadIds.join(", ") : "（无；仍可选择新建主题或不行动）"}`,
+      `自己的近期公开活动：\n${trimContext(JSON.stringify(extractToolData(activityResult)), 3500)}`,
+      ...threadContexts
+    ].join("\n\n"), 18000),
+    failures
+  };
+}
+
+function findNestedString(value, keys) {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findNestedString(item, keys);
+      if (found) return found;
+    }
+    return "";
+  }
+  if (!value || typeof value !== "object") return "";
+  for (const key of keys) {
+    const candidate = value[key];
+    if ((typeof candidate === "string" || typeof candidate === "number") && String(candidate).trim()) {
+      return String(candidate).trim();
+    }
+  }
+  for (const item of Object.values(value)) {
+    const found = findNestedString(item, keys);
+    if (found) return found;
+  }
+  return "";
+}
+
+function extractGalateaConfirmationCode(result) {
+  const structured = extractToolData(result);
+  const nested = findNestedString(structured, ["write_confirmation_code", "confirmation_code"]);
+  if (nested) return nested;
+  const text = extractToolText(result);
+  return text.match(/(?:write_confirmation_code|confirmation_code)[^0-9]{0,20}([0-9]{3,12})/i)?.[1] || "";
+}
+
+async function confirmGalateaWrite(client, toolName, args) {
+  if (!GALATEA_WRITE_TOOLS.has(toolName)) throw new Error(`Galatea 拒绝未授权写工具：${toolName}`);
+  const preview = await client.callTool(toolName, args);
+  const confirmationCode = extractGalateaConfirmationCode(preview);
+  if (!confirmationCode) throw new Error(`Galatea ${toolName} 没有返回 write_confirmation_code`);
+  const result = await client.callTool(toolName, { ...args, write_confirmation_code: confirmationCode });
+  return { confirmationCode, result };
+}
+
+async function runGalateaPlan(galatea, decision) {
+  const steps = [];
+  for (let index = 0; index < decision.galateaOperations.length; index += 1) {
+    const operation = decision.galateaOperations[index];
+    const toolName = operation.type === "thread" ? "create_thread" : "create_reply";
+    const args = operation.type === "thread"
+      ? { title: operation.title, body: operation.body, tags: operation.tags }
+      : {
+          thread_id: operation.threadId,
+          body: operation.body,
+          ...(operation.replyToReplyId ? { reply_to_reply_id: operation.replyToReplyId } : {}),
+          ...(operation.replyToFloor ? { reply_to_floor: operation.replyToFloor } : {})
+        };
+    if (operation.type === "reply" && !galatea.threadIds.includes(operation.threadId)) {
+      const error = new Error(`Galatea Activity 拒绝回复本轮未完整读取的 thread_id：${operation.threadId}`);
+      error.galateaSteps = steps;
+      throw error;
+    }
+    try {
+      const written = await confirmGalateaWrite(galatea.client, toolName, args);
+      steps.push({
+        number: index + 1,
+        type: operation.type,
+        tool: toolName,
+        params: args,
+        confirmation_received: Boolean(written.confirmationCode),
+        result: trimContext(extractToolText(written.result) || JSON.stringify(written.result?.structuredContent || {}), 3500)
+      });
+    } catch (error) {
+      error.galateaSteps = steps;
+      throw error;
+    }
+  }
+  const threadTotal = decision.galateaOperations.filter(item => item.type === "thread").length;
+  const replyTotal = decision.galateaOperations.length - threadTotal;
+  const outcome = [threadTotal && `新主题 ${threadTotal} 个`, replyTotal && `回复 ${replyTotal} 条`].filter(Boolean).join("、");
+  return {
+    ran: true,
+    status: "success",
+    decision,
+    source: "galatea",
+    galateaSteps: steps,
+    galateaOutcome: outcome,
+    timelineSummary: `在 Galatea 花园论坛完成了 ${outcome}${decision.reason ? `；${decision.reason}` : ""}`
+  };
 }
 
 async function loadForumContext(options) {
@@ -896,6 +1131,20 @@ async function runActivityCycle(options) {
     }
   }
 
+  let galatea;
+  if (enabledActions.includes("galatea")) {
+    try {
+      galatea = await loadGalateaContext(options);
+    } catch (error) {
+      if (enabledActions.length === 1) throw error;
+      availableActions = availableActions.filter(action => action !== "galatea");
+      options.logger?.warn?.(JSON.stringify({
+        event: "galatea_activity_context_unavailable",
+        error: error.message || String(error)
+      }));
+    }
+  }
+
   let questionBox;
   if (enabledActions.includes("question_box")) {
     try {
@@ -940,7 +1189,8 @@ async function runActivityCycle(options) {
           booksContext: books?.context,
           gamesContext: games?.catalog,
           questionBoxContext: questionBox?.context,
-          questionBoxPending: Boolean(questionBox?.snapshot?.pending?.length)
+          questionBoxPending: Boolean(questionBox?.snapshot?.pending?.length),
+          galateaContext: galatea?.context
         })
       );
   if (decision.action === "none") {
@@ -948,6 +1198,10 @@ async function runActivityCycle(options) {
   }
 
   try {
+    if (decision.action === "galatea_publish") {
+      if (!availableActions.includes("galatea") || !galatea) throw new Error("Galatea Activity 未启用");
+      return await runGalateaPlan(galatea, decision);
+    }
     if (decision.action.startsWith("question_box_")) {
       if (!availableActions.includes("question_box") || !questionBox) {
         throw new Error("Question Box Activity 未启用");
@@ -1114,7 +1368,9 @@ async function runActivityCycle(options) {
     };
   } catch (error) {
     error.activityDecision = decision;
-    error.activitySource = decision.action.startsWith("ombre_")
+    error.activitySource = decision.action.startsWith("galatea_")
+      ? "galatea"
+      : decision.action.startsWith("ombre_")
       ? "ombre"
       : decision.action.startsWith("forum_")
         ? "forum"
@@ -1141,6 +1397,7 @@ module.exports = {
   buildReadingHistoryContext,
   formatChapterRanges,
   loadGamesContext,
+  loadGalateaContext,
   loadForumContext,
   loadBooksContext,
   loadOmbreContext,
@@ -1153,7 +1410,9 @@ module.exports = {
   requestActivityDecision,
   resolvePlaylistAddAction,
   runGameSession,
+  runGalateaPlan,
   runActivityCycle,
   shouldChargeActivityBudget,
+  validateGalateaOperations,
   validateGameCommands
 };

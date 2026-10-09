@@ -149,7 +149,9 @@ function readWakeArchive(options = {}) {
       record.room_id,
       record.reply_to_message_id,
       record.question_id,
-      record.question_box_action
+      record.question_box_action,
+      record.galatea_outcome,
+      JSON.stringify(record.galatea_steps || [])
     ].some(value => String(value || "").toLowerCase().includes(query));
   }).slice(0, limit);
 

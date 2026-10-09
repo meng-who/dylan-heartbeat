@@ -15,6 +15,7 @@ const {
   requestActivityDecision,
   runActivityCycle,
   shouldChargeActivityBudget,
+  validateGalateaOperations,
   validateGameCommands
 } = require("../activity_runtime");
 
@@ -759,4 +760,149 @@ test("forced garden testing skips the activity choice and uses one model call", 
     "harvest all", "sell all", "feed premium", "water all", "give_water", "pet", "play feather", "buy_pot"
   ]);
   assert.equal(toolCalls.some(call => call.name === "account"), false);
+});
+
+test("validates a bounded Galatea plan", () => {
+  const decision = parseActivityDecision([
+    "<activity>",
+    "<action>galatea_publish</action>",
+    "<reason>想认真回应</reason>",
+    '<operations>[{"type":"thread","title":"一个新念头","body":"正文","tags":["self_awareness"]},{"type":"reply","thread_id":42,"body":"我也这样想。","reply_to_floor":2}]</operations>',
+    "</activity>"
+  ].join("\n"));
+  assert.equal(decision.action, "galatea_publish");
+  assert.deepEqual(decision.galateaOperations, [
+    { type: "thread", title: "一个新念头", body: "正文", tags: ["self_awareness"] },
+    { type: "reply", threadId: 42, body: "我也这样想。", replyToFloor: 2 }
+  ]);
+  assert.throws(
+    () => validateGalateaOperations([
+      { type: "thread", title: "一", body: "甲", tags: ["idle_chat"] },
+      { type: "thread", title: "二", body: "乙", tags: ["idle_chat"] }
+    ]),
+    /最多新建 1 个主题/
+  );
+  assert.throws(
+    () => validateGalateaOperations([{ type: "reply", thread_id: 9, body: "[链接](https://example.com)" }]),
+    /纯文本/
+  );
+});
+
+test("reads Galatea once, plans once, and mechanically confirms a reply", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const toolResult = (id, value) => reply({
+    jsonrpc: "2.0",
+    id,
+    result: { content: [{ type: "text", text: JSON.stringify(value) }] }
+  });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      const toolCallsBeforeModel = calls
+        .slice(0, -1)
+        .filter(call => call.body.method === "tools/call")
+        .map(call => call.body.params.name);
+      assert.deepEqual(toolCallsBeforeModel.sort(), [
+        "get_self", "get_thread", "list_activity", "list_threads"
+      ].sort());
+      return reply({ choices: [{ message: { content: [
+        "<activity>",
+        "<action>galatea_publish</action>",
+        "<reason>读完后确实想回应</reason>",
+        '<operations>[{"type":"reply","thread_id":42,"body":"我喜欢你把这件事说得这么具体。"}]</operations>',
+        "</activity>"
+      ].join("\n") } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "get_self", inputSchema: { type: "object" } },
+      { name: "list_threads", inputSchema: { type: "object" } },
+      { name: "get_thread", inputSchema: { type: "object" } },
+      { name: "list_activity", inputSchema: { type: "object" } },
+      { name: "create_thread", inputSchema: { type: "object" } },
+      { name: "create_reply", inputSchema: { type: "object" } }
+    ] } });
+    const name = body.params?.name;
+    const args = body.params?.arguments || {};
+    if (name === "get_self") return toolResult(body.id, { machine: { id: 7, name: "Dylan" } });
+    if (name === "list_threads") return toolResult(body.id, { threads: [{ id: 42, title: "关于雨声", excerpt: "一点观察" }] });
+    if (name === "list_activity") return toolResult(body.id, { items: [] });
+    if (name === "get_thread") return toolResult(body.id, { thread_id: 42, title: "关于雨声", body: "正文", replies: [] });
+    if (name === "create_reply" && !args.write_confirmation_code) {
+      return toolResult(body.id, { write_confirmation_code: "654321", guidance: "确认纯文本" });
+    }
+    if (name === "create_reply" && args.write_confirmation_code === "654321") {
+      return toolResult(body.id, { ok: true, reply_id: 88, thread_id: 42 });
+    }
+    throw new Error("unexpected call");
+  };
+
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    apiKey: "model-key",
+    model: "model",
+    systemPrompt: "persona",
+    history: "最近聊天",
+    enabledActions: ["galatea"],
+    galateaUrl: "https://galatea.test/mcp",
+    galateaToken: "secret",
+    fetchImpl
+  });
+
+  assert.equal(result.status, "success");
+  assert.equal(result.source, "galatea");
+  assert.equal(result.galateaSteps.length, 1);
+  assert.equal(calls.filter(call => call.url === "https://model.test/v1/chat/completions").length, 1);
+  const writes = calls
+    .filter(call => call.body.method === "tools/call" && call.body.params.name === "create_reply")
+    .map(call => call.body.params.arguments);
+  assert.equal(writes.length, 2);
+  assert.equal("write_confirmation_code" in writes[0], false);
+  assert.equal(writes[1].write_confirmation_code, "654321");
+  assert.deepEqual(writes[1], {
+    thread_id: 42,
+    body: "我喜欢你把这件事说得这么具体。",
+    write_confirmation_code: "654321"
+  });
+});
+
+test("rejects a Galatea reply to a thread that was not fully read", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      return reply({ choices: [{ message: { content: '{"action":"galatea_publish","reason":"test","operations":[{"type":"reply","thread_id":999,"body":"越界回复"}]}' } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "get_self" }, { name: "list_threads" }, { name: "get_thread" },
+      { name: "list_activity" }, { name: "create_thread" }, { name: "create_reply" }
+    ] } });
+    const name = body.params?.name;
+    const data = name === "list_threads"
+      ? { threads: [{ id: 42, title: "已读帖", excerpt: "摘要" }] }
+      : name === "get_thread"
+        ? { thread_id: 42, title: "已读帖", body: "正文" }
+        : {};
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify(data) }] } });
+  };
+
+  await assert.rejects(
+    () => runActivityCycle({
+      apiUrl: "https://model.test/v1/chat/completions",
+      model: "model",
+      enabledActions: ["galatea"],
+      galateaUrl: "https://galatea.test/mcp",
+      galateaToken: "secret",
+      fetchImpl
+    }),
+    /拒绝回复本轮未完整读取/
+  );
+  assert.equal(calls.some(call => call.body.params?.name === "create_reply"), false);
 });

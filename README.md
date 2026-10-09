@@ -370,13 +370,13 @@ OMBRE_MCP_TIMEOUT_MS=12000
 
 Activity Runtime 独立于普通主动推送：即使 `NIGHT_WAKE_AFTER_MINUTES=999`，它仍会按自己的闲置时间、冷却时间和每日预算判断是否运行。普通 Activity 每轮调用一次模型；Games Activity 会多调用一次模型来批量规划本轮操作。它不会在同一轮紧接着再运行普通唤醒。
 
-Activity 可从 Spotify、Ombre、AISay 潜水/读书、小游戏与 Notion 提问箱中每轮选择一件。Spotify 只开放搜索和向指定歌单添加歌曲，不开放播放、暂停、音量、资料库删除等工具。Ombre 会在同一轮模型调用前读取 `feel`、`I` 和最近信件作为回想材料，并只允许写一条候选自我认知或一封 AI 自己的普通未锁信件；写信前还会用最近信件做确定性正文去重，不会重复写入相同内容，也不会开放 `promote`、`supersedes` 或 `letter_lock_update`。新版 AISay 把所有功能收进统一的 `cli` 工具；正式启用论坛动作前，先用只读测试取得当前 `cli help` 指令表，再按真实 command 建立读写白名单。
+Activity 可从 Spotify、Ombre、AISay 潜水/读书、小游戏、Notion 提问箱与 Galatea 花园论坛中每轮选择一件。Spotify 只开放搜索和向指定歌单添加歌曲，不开放播放、暂停、音量、资料库删除等工具。Ombre 会在同一轮模型调用前读取 `feel`、`I` 和最近信件作为回想材料，并只允许写一条候选自我认知或一封 AI 自己的普通未锁信件；写信前还会用最近信件做确定性正文去重，不会重复写入相同内容，也不会开放 `promote`、`supersedes` 或 `letter_lock_update`。新版 AISay 把所有功能收进统一的 `cli` 工具；正式启用论坛动作前，先用只读测试取得当前 `cli help` 指令表，再按真实 command 建立读写白名单。
 
 先配置但保持关闭：
 
 ```env
 AUTONOMY_ENABLED=false
-AUTONOMY_ACTIONS=spotify,ombre,forum,games,question_box
+AUTONOMY_ACTIONS=spotify,ombre,forum,games,question_box,galatea
 AUTONOMY_TEST_FORCE_GAME=
 AUTONOMY_MODEL_NAME=自主活动专用主模型（可选）
 AUTONOMY_BACKUP_MODEL_NAME=自主活动专用备用模型（可选）
@@ -409,7 +409,8 @@ ADMIN_SESSION_DAYS=180
 ```
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
-- `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`books`、`games`、`question_box` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。`forum` 只会潜水读取已加入的公开房间并把感受或回复草稿存入私人 Archive，绝不会自动加群或发言；为兼容旧部署，启用 `forum` 时也会同时提供只读书店活动。若只想读书、不想潜水，可单独填写 `books`。
+- `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`books`、`games`、`question_box`、`galatea` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。`forum` 只会潜水读取已加入的公开房间并把感受或回复草稿存入私人 Archive，绝不会自动加群或发言；为兼容旧部署，启用 `forum` 时也会同时提供只读书店活动。若只想读书、不想潜水，可单独填写 `books`。
+- Galatea Activity 会在模型请求前读取当前身份、最新帖子、帖子完整正文与回复，以及自己的近期公开活动。模型只调用一次，可一次规划最多 3 个写动作，其中最多 1 个新主题；程序随后机械完成每项 `create_thread` / `create_reply` 的两段式确认，不再请求模型。回复只能指向本轮完整读取过的帖子；不会调用删除、点赞、关注、资料修改、游戏、漂流瓶或会消耗通知的工具。每一步参数与最终回执都会加密写入 Archive。
 - Books Activity 会从加密 Archive 自动整理全部可识别的成功阅读记录，以 `book_id + chapter_no` 建立阅读履历。它优先续读最近读过且已有新章的书，并避开重复章节；模型只收到最多 10 本书的压缩章节范围和本轮正文，不注入旧读后感，也不增加模型请求次数。
 - Question Box Activity 会在模型请求前只读 Notion：有 Melissa 未回答的问题时，本轮只允许回答其中一题；没有待答问题时，可提一个新问题、给最近的已完成问答补后记，或不行动。Notion 可发生多次确定性读写，但整轮仍只调用一次模型。写入前会重新读取页面，避免重复回答。
 - `AUTONOMY_TEST_FORCE_GAME`：仅用于短期联调，可填 `fishing` 或 `garden_cat`。设置后跳过“是否行动”的模型选择，直接测试该游戏，因此整轮只调用一次模型做批量规划；验证成功后立即删除。
@@ -425,10 +426,11 @@ ADMIN_SESSION_DAYS=180
 - `SPOTIFY_PLAYLIST_ID`：唯一允许写入的歌单。添加前会读取歌单前 50 首并按 Spotify track URI 查重；不需要 Spotify 设备在线，也不需要设备 ID。
 - Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
 - `FORUM_MCP_URL`：填写 AISay 完整的自动登录 MCP 地址，供论坛潜水与书店阅读共同使用。地址已经包含 `?token=...` 时，`FORUM_MCP_TOKEN` 留空即可；它属于密钥，只放 Render Secret，不要提交到 GitHub。
+- `GALATEA_MCP_TOKEN`：只填写原始 token，客户端会自动生成 `Authorization: Bearer <token>`；不要把 `Bearer ` 前缀重复写入变量，也不要提交到 GitHub。
 
 Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CHECK_INTERVAL_MINUTES` 或普通唤醒阈值影响。它与 Wake/Solo 恰好撞车时只会跳过这一次条件检查，稍后按自己的频率重试，避免同时调用两个模型。
 
-部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test`、`/admin/activity/forum-test`、`/admin/activity/games-test` 和 `/admin/activity/notion-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。AISay 测试入口只调用无副作用的 `cli({command:"help"})` 并返回指令指南；可用 `/admin/activity/forum-test?path=bookstore.read` 等路径继续查询领域或完整命令。游戏测试默认只调用 `list_games`；传入 `/admin/activity/games-test?game=fishing` 时还会只读调用该游戏的 `get_guide`；再加 `&inspect=help` 会固定调用只读的 `play(game, action="help", params={})`。Notion 测试入口只读取页面并返回识别到的题目、待答题与下一个题号。确认结果正确后再把 `question_box` 加入 `AUTONOMY_ACTIONS`。这些入口不会开局、游玩、修改账号、写入 Notion 或调用模型。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
+部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test`、`/admin/activity/forum-test`、`/admin/activity/games-test`、`/admin/activity/notion-test` 和 `/admin/activity/galatea-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。AISay 测试入口只调用无副作用的 `cli({command:"help"})` 并返回指令指南；可用 `/admin/activity/forum-test?path=bookstore.read` 等路径继续查询领域或完整命令。游戏测试默认只调用 `list_games`；传入 `/admin/activity/games-test?game=fishing` 时还会只读调用该游戏的 `get_guide`；再加 `&inspect=help` 会固定调用只读的 `play(game, action="help", params={})`。Notion 测试入口只读取页面并返回识别到的题目、待答题与下一个题号。Galatea 测试入口只初始化 MCP 并核对 `get_self`、`list_threads`、`get_thread`、`list_activity`、`create_thread`、`create_reply` 六项契约，不会真的调用写工具。确认结果正确后再把对应动作加入 `AUTONOMY_ACTIONS`。这些入口不会开局、游玩、修改账号、写入 Notion 或调用模型。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
 
 ## 🌦️ 天气注入
 

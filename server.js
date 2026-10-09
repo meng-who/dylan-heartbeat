@@ -1462,6 +1462,7 @@ function archivePageHtml() {
       if (item.reply_to_message_id) details.push("留意消息：" + item.reply_to_message_id);
       if (item.game_name) details.push("游戏：" + item.game_name);
       if (item.game_outcome) details.push("结果：" + item.game_outcome);
+      if (item.galatea_outcome) details.push("花园论坛：" + item.galatea_outcome);
       if (item.question_id) details.push("提问箱：" + item.question_id);
       if (item.question_box_action) details.push("提问箱动作：" + item.question_box_action);
       if (item.kind === "activity") {
@@ -1498,6 +1499,18 @@ function archivePageHtml() {
         ].filter(Boolean).join("\\n")).join("\\n\\n");
         gameSteps.append(node("div", "narrative-body", stepText));
         article.append(gameSteps);
+      }
+      if (item.kind === "activity" && Array.isArray(item.galatea_steps) && item.galatea_steps.length) {
+        const galateaSteps = node("details", "narrative");
+        galateaSteps.append(node("summary", "", "查看花园论坛经过（" + item.galatea_steps.length + " 步）"));
+        const stepText = item.galatea_steps.map(step => [
+          "第 " + step.number + " 步：" + (step.type === "thread" ? "新主题" : "回复") + "（" + step.tool + "）",
+          "参数：" + JSON.stringify(step.params || {}),
+          step.confirmation_received ? "二次确认：已完成" : "",
+          step.result ? "返回：" + step.result : ""
+        ].filter(Boolean).join("\\n")).join("\\n\\n");
+        galateaSteps.append(node("div", "narrative-body", stepText));
+        article.append(galateaSteps);
       }
       const remove = node("button", "delete", "删除此条");
       remove.type = "button";
@@ -1756,12 +1769,15 @@ app.get("/admin/activity/galatea-test", { preHandler: basicAuth }, async (req, r
     });
     const tools = await client.listTools();
     const names = tools.map(tool => tool.name);
-    const forumPattern = /forum|garden|post|thread|topic|feed|timeline|reply|comment|profile|identity|account|user|\bme\b|board|category|notification/i;
+    const required = ["get_self", "list_threads", "get_thread", "list_activity", "create_thread", "create_reply"];
+    const missing = required.filter(name => !names.includes(name));
     const selected = includeAll
       ? tools
-      : tools.filter(tool => forumPattern.test([tool.name, tool.description].filter(Boolean).join(" ")));
-    return {
-      ok: true,
+      : tools.filter(tool => required.includes(tool.name));
+    return reply.code(missing.length ? 502 : 200).send({
+      ok: missing.length === 0,
+      required,
+      missing,
       available: names,
       tool_count: names.length,
       selected_count: selected.length,
@@ -1772,7 +1788,7 @@ app.get("/admin/activity/galatea-test", { preHandler: basicAuth }, async (req, r
         input_schema: tool.inputSchema || {}
       })),
       all_contracts_url: includeAll ? "" : "/admin/activity/galatea-test?all=1"
-    };
+    });
   } catch (error) {
     req.log.error({ event: "galatea_activity_mcp_test_failed", error: error.message });
     return reply.code(502).send({ ok: false, error: error.message });
