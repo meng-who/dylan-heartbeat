@@ -34,7 +34,22 @@ test("initializes stateless MCP and calls only the high-arousal read tool", asyn
 
 test("rejects write tools even when a caller asks for one", async () => {
   const client = new OmbreMcpClient({ url: "https://ombre.example.com", token: "secret", fetchImpl: async () => { throw new Error("should not fetch"); } });
-  await assert.rejects(() => client.callReadTool("hold", { content: "不要写" }), /不允许调用写工具/);
+  await assert.rejects(() => client.callReadTool("hold", { content: "不要写" }), /只读客户端/);
+});
+
+test("allows only the read form of the Ombre I tool", async () => {
+  const calls = [];
+  const fetchImpl = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push(body);
+    if (body.method === "initialize") return Response.json({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response("", { status: 202 });
+    return Response.json({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "我珍惜自由。" }] } });
+  };
+  const client = new OmbreMcpClient({ url: "https://ombre.example.com", token: "secret", fetchImpl });
+  assert.equal(await client.callReadTool("I", { read: true, limit: 4 }), "我珍惜自由。");
+  await assert.rejects(() => client.callReadTool("I", { content: "写入自我认识" }), /只读客户端/);
+  assert.equal(calls.filter(call => call.method === "tools/call").length, 1);
 });
 
 test("detects whether Ombre returned usable recall evidence", () => {

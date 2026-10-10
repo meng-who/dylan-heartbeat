@@ -12,8 +12,10 @@ const {
 } = require("./wake_guardrails");
 const { isSpecialEventContent } = require("./special_events");
 const { findSimilarRecentPush, getLatestSentPushTime, getRecentSentPushes } = require("./wake_dedup");
-const { appendWakeArchive, buildWakeArchiveOutcome, readReadingHistory } = require("./wake_archive");
+const { appendWakeArchive, archiveConfigured, buildWakeArchiveOutcome, readReadingHistory } = require("./wake_archive");
 const { runSoloCycle } = require("./solo_runtime");
+const { OmbreMcpClient } = require("./ombre_mcp_client");
+const { readDreamMemory, runDreamCycle } = require("./dream_runtime");
 const {
   activityGate,
   classifyActivityFailure,
@@ -34,6 +36,7 @@ const {
 const TIMELINE_PATH = dataPath("enhanced_messages.json");
 const USER_ACTIVITY_PATH = dataPath("last_user_activity.json");
 const ACTIVITY_STATE_PATH = dataPath("activity_state.json");
+const DREAM_STATE_PATH = dataPath("dream_state.json");
 const PORT = Number(process.env.PORT) || 3000;
 // Gateway 与 wake-up 由 start_all.js 启动在同一容器；内部写请求直接走 loopback，
 // 避免绕公网反代后因来源 IP、旧 .env 或 key 不一致导致心跳被拒绝。
@@ -929,6 +932,54 @@ ${recentSentPushes.length
   }
 }
 
+function loadDreamState() {
+  try { return JSON.parse(fs.readFileSync(DREAM_STATE_PATH, "utf8")); }
+  catch { return {}; }
+}
+
+async function runDreamCheck() {
+  if (!readBooleanEnv("DREAM_ENABLED", false)) return { ran: false, reason: "disabled" };
+  if (!archiveConfigured()) return { ran: false, reason: "archive_not_configured" };
+  const messages = loadTimelineMessages();
+  if (!messages) return { ran: false, reason: "timeline_missing" };
+  const lastUser = loadRecordedUserActivity() || getLatestUserActivity(
+    messages,
+    content => parseTimelineTimestamp(normalizeContentToText(content))
+  );
+  return runDreamCycle({
+    env: process.env,
+    now: new Date(),
+    timeZone: TIME_ZONE,
+    messages,
+    lastUserAt: lastUser?.time,
+    loadState: loadDreamState,
+    saveState: state => writeJsonAtomicSync(DREAM_STATE_PATH, state),
+    readMemory: async ({ conversation } = {}) => {
+      if (!process.env.OMBRE_MCP_URL || !process.env.OMBRE_MCP_TOKEN) return "";
+      const client = new OmbreMcpClient({
+        url: process.env.OMBRE_MCP_URL,
+        token: process.env.OMBRE_MCP_TOKEN,
+        timeoutMs: readPositiveTimeout("OMBRE_MCP_TIMEOUT_MS", 12_000)
+      });
+      return readDreamMemory({ client, conversation, logger: console });
+    },
+    archive: record => appendWakeArchive(record),
+    recordSummary: async summary => {
+      const localTime = getLocalTimeString();
+      const response = await fetch(GATEWAY_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Gateway-API-Key": process.env.GATEWAY_API_KEY || ""
+        },
+        body: JSON.stringify({ content: `（${localTime} 梦境：${summary}。这是梦，不是真实发生的事。）` })
+      });
+      if (!response.ok) throw new Error(`Gateway 返回 HTTP ${response.status}`);
+    },
+    logger: console
+  });
+}
+
 async function runSoloCheck() {
   if (!readBooleanEnv("SOLO_ENABLED", false)) return { ran: false, reason: "scheduler_disabled" };
   if (!process.env.PULSE_WORKER_URL || !process.env.PULSE_CLIENT_KEY) {
@@ -1353,7 +1404,13 @@ async function scheduleNextCheck() {
           console.error("Solo 检查失败，继续普通唤醒:", error.message);
         }
         if (!soloResult.ran && !soloResult.cancelled && soloResult.reason !== "already_running") {
-          await runWakeUp();
+          let dreamResult = { ran: false };
+          try {
+            dreamResult = await runDreamCheck();
+          } catch (error) {
+            console.error("梦境检查失败，继续普通唤醒:", error.message);
+          }
+          if (!dreamResult.ran) await runWakeUp();
         }
       } finally {
         activeBackgroundTask = "";

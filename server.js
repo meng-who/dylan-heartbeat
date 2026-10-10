@@ -19,13 +19,16 @@ const {
   semanticPulseSseStream
 } = require("./pulse_sidecar");
 const { createUserActivityRecord, stampLatestUserActivity } = require("./timeline_activity");
-const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
+const { formatDateTimeInTimeZone, parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
 const {
   DEFAULT_ARCHIVE_PATH,
+  appendWakeArchive,
   archiveConfigured,
   deleteWakeArchiveRecord,
   readWakeArchive
 } = require("./wake_archive");
+const { buildDreamMessages, conversationMaterial, readDreamMemory, requestDream } = require("./dream_runtime");
+const { OmbreMcpClient } = require("./ombre_mcp_client");
 const {
   addPulseOutputHeadroom,
   applyHttpResilience,
@@ -65,6 +68,7 @@ const IS_CLOUD_RUNTIME = Boolean(
 const TIMELINE_FILE = dataPath("enhanced_messages.json");
 const TIMESTAMP_DB_FILE = dataPath("message_timestamps.json");
 const USER_ACTIVITY_FILE = dataPath("last_user_activity.json");
+let manualDreamRunning = false;
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
 const DEFAULT_RESTART_COMMAND = "self";
@@ -313,7 +317,8 @@ function saveTimeline(messages) {
   );
   const maxActivityEvents = readPositiveIntegerEnv("MAX_INJECTED_ACTIVITY_EVENTS", 8);
   const maxSoloEvents = readPositiveIntegerEnv("MAX_INJECTED_SOLO_EVENTS", 4);
-  const maxSpecialEvents = Math.max(maxPushEvents + maxActivityEvents + maxSoloEvents, 20);
+  const maxDreamEvents = readPositiveIntegerEnv("MAX_INJECTED_DREAM_EVENTS", 2);
+  const maxSpecialEvents = Math.max(maxPushEvents + maxActivityEvents + maxSoloEvents + maxDreamEvents, 20);
   const final = retainTimelineMessages(messages, {
     maxRealMessages: maxTimelineMessages,
     maxSpecialEvents,
@@ -528,6 +533,7 @@ function selectAutomationEvents(events) {
   );
   const maxActivityEvents = readPositiveIntegerEnv("MAX_INJECTED_ACTIVITY_EVENTS", 8);
   const maxSoloEvents = readPositiveIntegerEnv("MAX_INJECTED_SOLO_EVENTS", 4);
+  const maxDreamEvents = readPositiveIntegerEnv("MAX_INJECTED_DREAM_EVENTS", 2);
   const indexedEvents = events.map((event, index) => ({ event, index }));
   const recentPushEvents = indexedEvents
     .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "push")
@@ -538,7 +544,10 @@ function selectAutomationEvents(events) {
   const recentSoloEvents = indexedEvents
     .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "solo")
     .slice(-maxSoloEvents);
-  const selectedIndexes = new Set([...recentPushEvents, ...recentActivityEvents, ...recentSoloEvents].map(({ index }) => index));
+  const recentDreamEvents = indexedEvents
+    .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "dream")
+    .slice(-maxDreamEvents);
+  const selectedIndexes = new Set([...recentPushEvents, ...recentActivityEvents, ...recentSoloEvents, ...recentDreamEvents].map(({ index }) => index));
   const selectedEvents = indexedEvents
     .filter(({ index }) => selectedIndexes.has(index))
     .map(({ event }) => event);
@@ -555,7 +564,7 @@ function addAutomationEventContext(messages, events) {
   const note = [
     "[Dylan 自动化内部记录]",
     "以下内容由自动化程序生成，不是用户发送或展示给你的消息。",
-    "它用于帮助你记住自己此前是否尝试推送、Solo 独处的概要，以及成功完成过哪些自主活动；不要把它归因于用户。",
+    "它用于帮助你记住自己此前是否尝试推送、Solo 独处的概要，成功完成过哪些自主活动，以及梦境概要；不要把它归因于用户。梦境不是现实经历。",
     eventLog,
     "[/Dylan 自动化内部记录]"
   ].join("\n");
@@ -1146,6 +1155,76 @@ app.post("/internal/wake-event", async (req, reply) => {
   }
 });
 
+app.post("/admin/dream-test", { preHandler: basicAuth }, async (req, reply) => {
+  if (manualDreamRunning) return reply.code(409).send({ success: false, error: "已经有一个测试梦正在生成" });
+  if (!process.env.BIGMODEL_API_KEY || !process.env.DREAM_MODEL_NAME) {
+    return reply.code(400).send({ success: false, error: "请先配置 BIGMODEL_API_KEY 和 DREAM_MODEL_NAME" });
+  }
+  if (!archiveConfigured()) {
+    return reply.code(400).send({ success: false, error: "请先配置有效的 WAKE_ARCHIVE_KEY" });
+  }
+
+  manualDreamRunning = true;
+  try {
+    const timeline = loadTimeline();
+    const conversation = conversationMaterial(timeline);
+    let memory = "";
+    if (process.env.OMBRE_MCP_URL && process.env.OMBRE_MCP_TOKEN) {
+      const client = new OmbreMcpClient({
+        url: process.env.OMBRE_MCP_URL,
+        token: process.env.OMBRE_MCP_TOKEN,
+        timeoutMs: readPositiveIntegerEnv("OMBRE_MCP_TIMEOUT_MS", 12_000)
+      });
+      memory = await readDreamMemory({ client, conversation, logger: app.log });
+    }
+    if (!memory && !conversation) {
+      return reply.code(400).send({ success: false, error: "没有可用的 Ombre 记忆或真实对话素材" });
+    }
+
+    const result = await requestDream({
+      apiKey: process.env.BIGMODEL_API_KEY,
+      model: process.env.DREAM_MODEL_NAME,
+      messages: buildDreamMessages(memory, conversation, process.env.DREAM_STYLE_PROMPT)
+    });
+    const now = new Date();
+    const archived = appendWakeArchive({
+      kind: "dream",
+      status: "completed",
+      manual: true,
+      night: formatDateTimeInTimeZone(now, TIME_ZONE).slice(0, 10),
+      model: process.env.DREAM_MODEL_NAME,
+      dream: result.dream,
+      summary: result.summary,
+      memory_used: Boolean(memory),
+      conversation_used: Boolean(conversation)
+    });
+    if (!archived.saved) throw new Error("梦境加密归档失败");
+
+    let summaryInjected = false;
+    try {
+      appendSpecialEvent(`（${formatDateTimeInTimeZone(now, TIME_ZONE)} 梦境：${result.summary}。这是梦，不是真实发生的事。）`);
+      summaryInjected = true;
+    } catch (error) {
+      app.log.error({ err: error }, "测试梦概要写入时间线失败");
+    }
+    return reply.send({
+      success: true,
+      dream: result.dream,
+      summary: result.summary,
+      model: process.env.DREAM_MODEL_NAME,
+      archived: true,
+      summary_injected: summaryInjected,
+      memory_used: Boolean(memory),
+      conversation_used: Boolean(conversation)
+    });
+  } catch (error) {
+    app.log.error({ err: error }, "测试梦生成失败");
+    return reply.code(500).send({ success: false, error: String(error.message || error) });
+  } finally {
+    manualDreamRunning = false;
+  }
+});
+
 // ========================
 // 读取 .env 值
 // ========================
@@ -1298,7 +1377,7 @@ function archivePageHtml() {
     <header>
       <div>
         <h1>Dylan Archive</h1>
-        <p>自动唤醒、Solo 与自主活动记录。档案在磁盘中始终加密保存。</p>
+        <p>自动唤醒、Solo、自主活动与梦境记录。档案在磁盘中始终加密保存。</p>
       </div>
       <div class="actions">
         <a class="button" href="/admin">返回管理页</a>
@@ -1312,6 +1391,7 @@ function archivePageHtml() {
         <option value="wake">主动推送</option>
         <option value="solo">Solo</option>
         <option value="activity">自主活动</option>
+        <option value="dream">梦境</option>
       </select>
       <select id="status" aria-label="筛选结果">
         <option value="">全部结果</option>
@@ -1325,6 +1405,7 @@ function archivePageHtml() {
         <option value="not_sent">未发送</option>
         <option value="kept_private">留在心里</option>
         <option value="success">行动成功</option>
+        <option value="completed">梦境完成</option>
         <option value="failed">行动失败</option>
         <option value="skipped">已跳过</option>
       </select>
@@ -1343,7 +1424,7 @@ function archivePageHtml() {
       push_failed: "推送失败", no_action: "AI 选择不发送",
       diary_only: "只写日记", empty: "空回复", not_sent: "未发送",
       kept_private: "留在心里", success: "行动成功",
-      failed: "行动失败", skipped: "已跳过"
+      failed: "行动失败", skipped: "已跳过", completed: "梦境完成"
     };
     const query = document.getElementById("query");
     const kind = document.getElementById("kind");
@@ -1396,13 +1477,15 @@ function archivePageHtml() {
     function renderRecord(item) {
       const article = node("article", "record");
       const head = node("div", "record-head");
-      const kindLabels = { wake: "主动推送", solo: "Solo", activity: "自主活动" };
+      const kindLabels = { wake: "主动推送", solo: "Solo", activity: "自主活动", dream: "梦境" };
       head.append(node("span", "kind", kindLabels[item.kind || "wake"] || item.kind));
       head.append(node("span", "status status-" + item.status, labels[item.status] || item.status));
       head.append(node("time", "", item.local_time || item.created_at || "未知时间"));
       head.append(node("span", "model", item.model || "未知模型"));
       article.append(head);
       if (item.kind === "solo" && item.summary) appendArchiveText(article, "candidate", item.summary, "查看完整摘要");
+      if (item.kind === "dream" && item.summary) appendArchiveText(article, "candidate", item.summary, "查看梦境概要");
+      if (item.kind === "dream" && item.dream) appendArchiveText(article, "final", item.dream, "查看完整梦境");
       if (item.kind === "activity") {
         const wasExecuted = item.status === "success";
         const summaryLabel = wasExecuted
@@ -2460,6 +2543,13 @@ const html = `<!DOCTYPE html>
 
     <a class="archive-link" href="/admin/archive">打开 Wake Archive · ${escapeHtml(archiveStatus)}</a>
 
+    <div class="diary-box">
+      <h3>Dream Preview</h3>
+      <p>立即用正式的 Ombre 素材与梦境 Prompt 生成一次测试梦；跳过时间、空闲、概率和今晚状态检查。</p>
+      <button id="dreamTestButton" onclick="generateTestDream()">立即做一个测试梦</button>
+      <pre id="dreamTestResult" style="display:none;white-space:pre-wrap;line-height:1.7;margin-top:14px;"></pre>
+    </div>
+
     <!-- 预设方案 -->
     <div class="presets-box">
       <h3>预设方案</h3>
@@ -2687,6 +2777,33 @@ const html = `<!DOCTYPE html>
         }
       } catch (e) {
         alert("请求失败：" + e.message);
+      }
+    }
+
+    async function generateTestDream() {
+      if (!confirm("现在生成一个测试梦？它会调用一次 DREAM_MODEL_NAME，并写入加密 Archive。")) return;
+      const button = document.getElementById("dreamTestButton");
+      const output = document.getElementById("dreamTestResult");
+      button.disabled = true;
+      button.textContent = "正在做梦…";
+      output.style.display = "block";
+      output.textContent = "正在从 Ombre 取材并生成梦境，通常需要几十秒。";
+      try {
+        const resp = await fetch("/admin/dream-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": AUTH_HEADER },
+          body: "{}"
+        });
+        const result = await resp.json();
+        if (!resp.ok || !result.success) throw new Error(result.error || "生成失败");
+        output.textContent = result.dream + "\n\n概要：" + result.summary +
+          "\n模型：" + result.model +
+          "\n素材：" + (result.memory_used ? "Ombre " : "") + (result.conversation_used ? "最近对话" : "");
+      } catch (error) {
+        output.textContent = "测试梦生成失败：" + error.message;
+      } finally {
+        button.disabled = false;
+        button.textContent = "再做一个测试梦";
       }
     }
 

@@ -140,6 +140,7 @@ function readWakeArchive(options = {}) {
       record.mode,
       record.summary,
       record.narrative,
+      record.dream,
       record.source,
       record.action,
       record.query,

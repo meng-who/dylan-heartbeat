@@ -347,6 +347,36 @@ WAKE_DAY_END_HOUR=24
 - `DAY_CHECK_INTERVAL_MINUTES` / `NIGHT_CHECK_INTERVAL_MINUTES`：后台多久检查一次是否应该唤醒。
 - `WAKE_DAY_START_HOUR` / `WAKE_DAY_END_HOUR`：哪一段时间算“白天”；不在白天范围内就按夜间策略处理。
 
+## 🌙 梦境（实验功能）
+
+梦境沿用 Heartbeat 的夜间检查，不需要另设 cron。北京时间 22:00 至次日 08:00、用户离开达到 `DREAM_IDLE_MINUTES` 后，每个夜晚只做一次概率判定。默认概率 `0.35`：即每晚有 35% 的机会尝试生成，没抽中就安静结束；频繁检查不会累积概率。重启后判定仍保存在 `DATA_DIR/dream_state.json`。默认关闭，所以部署代码不会让今晚自动做梦。
+
+抽中后，程序从 Ombre Brain 并行读取三类素材：`breath_advanced` 自然浮现的经历碎片、与最近真实对话相关的 `feel`、以及只读的 `I` 自我认识。核心准则 `pinned/permanent` 会在本地剔除，因为它们是行为坐标而不是经历。经历占主要素材预算，感受和自我认识只提供情绪底色与第一人称视角；任一路读取失败都不影响其余素材。最近真实对话最多取 30 条、总计 7000 字符；不会读取 Solo、Activity 或读书 Archive。
+
+这些 Ombre 调用只是记忆库读取与向量检索，不调用模型。整场梦仅向智谱 BigModel 发送一次生成请求，不调用对话主模型，也不会发送手机推送。梦的完整正文写进加密 Archive；下一次聊天只收到带“这是梦，不是真实发生的事”标记的短概要。模型失败时，那个夜晚不反复重试。
+
+梦境不额外分成“好梦”和“噩梦”，也不会安排独立的噩梦概率。Prompt 允许短暂、轻微的不安、失落或陌生感，但会避免追杀、虐待、羞辱、持续恐惧和受困无解等噩梦式升级。
+
+需要立刻检查生成质量时，可以打开 `/admin`，在 **Dream Preview** 中点击“立即做一个测试梦”。这个入口使用和正式梦境完全相同的 Ombre 取材、Prompt、模型与归档流程，只跳过时间窗口、空闲时长、概率和当晚判定。生成的全文会直接显示在管理页并写入加密 Archive，短概要也会作为梦境事件进入下一次聊天上下文。
+
+在 Render 中配置以下变量。`BIGMODEL_API_KEY` 从智谱 BigModel 开放平台获取；`glm-4.7-flash` 由智谱官方标为免费调用：
+
+```env
+DREAM_ENABLED=false
+DREAM_PROBABILITY=0.35
+DREAM_IDLE_MINUTES=120
+DREAM_START_HOUR=22
+DREAM_END_HOUR=8
+DREAM_MODEL_NAME=glm-4.7-flash
+BIGMODEL_API_KEY=你的智谱 BigModel API 密钥
+MAX_INJECTED_DREAM_EVENTS=2
+OMBRE_MCP_URL=https://你的-ombre服务.onrender.com/mcp
+OMBRE_MCP_TOKEN=你的Ombre静态Token
+WAKE_ARCHIVE_KEY=现有的32字节Base64URL密钥
+```
+
+确认密钥和免费模型可用后，把 `DREAM_ENABLED` 改为 `true`。密钥只存 Render Secret，不要提交 GitHub。`DREAM_PROBABILITY=0` 表示永远不抽中，`1` 表示每个符合条件的夜晚都尝试；这不是生成成功率，也不会保证某一晚一定有梦。`DREAM_START_HOUR` 和 `DREAM_END_HOUR` 按 `TIME_ZONE` 控制可做梦时段，可以跨午夜；小时通常取 0 至 23，`24` 会按 `0` 处理。程序内置了增强版梦境 Prompt，不需要配置 `DREAM_STYLE_PROMPT`；只有想临时修改梦的口吻、氛围或叙事习惯时才添加它。JSON 输出格式、素材边界和梦境标记始终由程序固定保护。`MAX_INJECTED_DREAM_EVENTS=2` 表示后续聊天最多注入最近两次梦的短概要，完整梦境始终只保存在加密 Archive 中。
+
 ## 🌙 Solo AI（独处事件）
 
 Solo 是独立于普通聊天和主动唤醒的后台体验。Pulse 会缓慢积累“想独处一下”的欲望；达到面板阈值且你离开了一段时间后，Dylan 才会运行一次。AI 会在 `recall`（真实回忆）、`fantasy`（私人幻想）或 `mix`（回忆延伸为幻想）中经历一次独处，并自行决定要不要给你发一条很短的推送。你一回来发消息，正在进行的 Solo 会立即停止。
