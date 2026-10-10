@@ -2796,9 +2796,9 @@ const html = `<!DOCTYPE html>
         });
         const result = await resp.json();
         if (!resp.ok || !result.success) throw new Error(result.error || "生成失败");
-        output.textContent = result.dream + "\n\n概要：" + result.summary +
-          "\n模型：" + result.model +
-          "\n素材：" + (result.memory_used ? "Ombre " : "") + (result.conversation_used ? "最近对话" : "");
+        output.textContent = result.dream + "\\n\\n概要：" + result.summary +
+          "\\n模型：" + result.model +
+          "\\n素材：" + (result.memory_used ? "Ombre " : "") + (result.conversation_used ? "最近对话" : "");
       } catch (error) {
         output.textContent = "测试梦生成失败：" + error.message;
       } finally {
