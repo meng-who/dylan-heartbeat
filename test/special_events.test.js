@@ -1,7 +1,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 
-const { classifySpecialEventContent, isSpecialEventContent } = require("../special_events");
+const { classifySpecialEventContent, isSpecialEventContent, selectRecentAutomationEvents } = require("../special_events");
 
 test("recognizes timestamped wake events", () => {
   assert.equal(isSpecialEventContent("（2026-08-10 20:10 自动唤醒：本次未发送推送｜原因：不打扰）"), true);
@@ -23,4 +23,25 @@ test("classifies push, activity and solo records independently", () => {
 test("does not mistake ordinary chat about pushes for a wake event", () => {
   assert.equal(isSpecialEventContent("我刚刚给用户发了推送，不过这只是回答里的说明。"), false);
   assert.equal(isSpecialEventContent("2026-08-10 20:10 我觉得‘自动唤醒：本次未发送推送’这句话很奇怪。"), false);
+});
+
+test("selects the newest automation records by timestamp rather than array order", () => {
+  const events = [
+    { content: "（2026-10-10 10:00 自主活动：今天的新活动）" },
+    { content: "（2026-10-09 21:00 自主活动：昨天较晚的活动）" },
+    { content: "（2026-10-09 09:00 自主活动：昨天较早的活动）" },
+    { content: "（2026-10-10 11:00 Solo 独处：今天的独处）" },
+    { content: "（2026-10-08 11:00 Solo 独处：前天的独处）" }
+  ];
+  const selected = selectRecentAutomationEvents(events, {
+    maxPushEvents: 0,
+    maxActivityEvents: 1,
+    maxSoloEvents: 1,
+    maxDreamEvents: 0,
+    getTimestamp: event => new Date(event.content.match(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/)[0].replace(" ", "T") + ":00Z")
+  });
+  assert.deepEqual(selected.map(event => event.content), [
+    "（2026-10-10 10:00 自主活动：今天的新活动）",
+    "（2026-10-10 11:00 Solo 独处：今天的独处）"
+  ]);
 });

@@ -13,4 +13,39 @@ function classifySpecialEventContent(content) {
   return "push";
 }
 
-module.exports = { classifySpecialEventContent, isSpecialEventContent, SPECIAL_EVENT_PREFIX };
+function selectRecentAutomationEvents(events = [], {
+  maxPushEvents = 10,
+  maxActivityEvents = 8,
+  maxSoloEvents = 4,
+  maxDreamEvents = 2,
+  getTimestamp = () => null
+} = {}) {
+  const indexed = events.map((event, index) => {
+    const value = getTimestamp(event);
+    const timestamp = value instanceof Date ? value.getTime() : Number(value);
+    return { event, index, timestamp: Number.isFinite(timestamp) ? timestamp : null };
+  });
+  const byRecency = (a, b) => {
+    if (a.timestamp != null && b.timestamp != null && a.timestamp !== b.timestamp) {
+      return a.timestamp - b.timestamp;
+    }
+    return a.index - b.index;
+  };
+  const takeLatest = (kind, limit) => indexed
+    .filter(({ event }) => classifySpecialEventContent(event?.content) === kind)
+    .sort(byRecency)
+    .slice(-Math.max(0, limit));
+  return [
+    ...takeLatest("push", maxPushEvents),
+    ...takeLatest("activity", maxActivityEvents),
+    ...takeLatest("solo", maxSoloEvents),
+    ...takeLatest("dream", maxDreamEvents)
+  ].sort(byRecency).map(({ event }) => event);
+}
+
+module.exports = {
+  classifySpecialEventContent,
+  isSpecialEventContent,
+  selectRecentAutomationEvents,
+  SPECIAL_EVENT_PREFIX
+};

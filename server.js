@@ -4,7 +4,7 @@ const Fastify = require("fastify");
 const fs = require("fs-extra");
 const path = require("path");
 const { dataPath, resolveDataPath, writeJsonAtomicSync } = require("./storage");
-const { classifySpecialEventContent, isSpecialEventContent } = require("./special_events");
+const { isSpecialEventContent, selectRecentAutomationEvents } = require("./special_events");
 const { retainTimelineMessages } = require("./timeline_retention");
 const { decideRequestAccess } = require("./network_access");
 const { fetchPulseDashboard } = require("./pulse_dashboard_proxy");
@@ -534,24 +534,14 @@ function selectAutomationEvents(events) {
   const maxActivityEvents = readPositiveIntegerEnv("MAX_INJECTED_ACTIVITY_EVENTS", 8);
   const maxSoloEvents = readPositiveIntegerEnv("MAX_INJECTED_SOLO_EVENTS", 4);
   const maxDreamEvents = readPositiveIntegerEnv("MAX_INJECTED_DREAM_EVENTS", 2);
-  const indexedEvents = events.map((event, index) => ({ event, index }));
-  const recentPushEvents = indexedEvents
-    .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "push")
-    .slice(-maxPushEvents);
-  const recentActivityEvents = indexedEvents
-    .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "activity")
-    .slice(-maxActivityEvents);
-  const recentSoloEvents = indexedEvents
-    .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "solo")
-    .slice(-maxSoloEvents);
-  const recentDreamEvents = indexedEvents
-    .filter(({ event }) => classifySpecialEventContent(normalizeContentToText(event.content)) === "dream")
-    .slice(-maxDreamEvents);
-  const selectedIndexes = new Set([...recentPushEvents, ...recentActivityEvents, ...recentSoloEvents, ...recentDreamEvents].map(({ index }) => index));
-  const selectedEvents = indexedEvents
-    .filter(({ index }) => selectedIndexes.has(index))
-    .map(({ event }) => event);
-  return selectedEvents;
+  const timestampDB = loadTimestampDB();
+  return selectRecentAutomationEvents(events, {
+    maxPushEvents,
+    maxActivityEvents,
+    maxSoloEvents,
+    maxDreamEvents,
+    getTimestamp: event => extractTimestampWithMemory(event, timestampDB)
+  });
 }
 
 function addAutomationEventContext(messages, events) {
@@ -811,8 +801,6 @@ app.post("/v1/chat/completions", async (req, reply) => {
     }));
 
     const kelivoMessages = cleanPulseArtifacts(body.messages || []);
-    const oldTimeline = loadTimeline();
-
     const tsDB = loadTimestampDB();
     let tsDBDirty = false;
     for (const msg of kelivoMessages) {
@@ -836,8 +824,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       .map(prepareMessageForLLM)
       .filter(Boolean);
 
-    const oldEvents = stripPosition(
-      oldTimeline.filter(isSpecialEvent).sort((a, b) => {
+    const currentEvents = stripPosition(
+      finalTimeline.filter(isSpecialEvent).sort((a, b) => {
         const timeA = extractTimestampWithMemory(a, tsDB);
         const timeB = extractTimestampWithMemory(b, tsDB);
         if (timeA && timeB) return timeA - timeB;
@@ -845,8 +833,8 @@ app.post("/v1/chat/completions", async (req, reply) => {
       })
     );
 
-    console.log("本次注入的特殊事件数量:", readBooleanEnv("INJECT_WAKE_EVENTS", true) ? selectAutomationEvents(oldEvents).length : 0);
-    addAutomationEventContext(llmMessages, oldEvents);
+    console.log("本次注入的特殊事件数量:", readBooleanEnv("INJECT_WAKE_EVENTS", true) ? selectAutomationEvents(currentEvents).length : 0);
+    addAutomationEventContext(llmMessages, currentEvents);
 
     requestStage = "pulse_prepare";
     let pulseContext = null;
