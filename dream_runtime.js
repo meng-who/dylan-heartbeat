@@ -40,6 +40,43 @@ function conversationMaterial(messages) {
     .slice(0, 3500);
 }
 
+function dreamRecallQuery(conversation) {
+  return String(conversation || "")
+    .replace(/(?:^|\n)(?:用户|AI)：/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(-300);
+}
+
+function stripCorePrinciples(value) {
+  return String(value || "")
+    .replace(/(?:^|\n)=== 核心准则 ===\s*\n[\s\S]*?(?=\n=== [^\n]+ ===|$)/g, "\n")
+    .trim();
+}
+
+function currentSelfMaterial(value) {
+  return String(value || "")
+    .split(/(?=^=== )/m)
+    .filter(section => !/^=== (?:我正在改的主意|已经被取代的)/.test(section))
+    .join("")
+    .trim();
+}
+
+function dreamMemoryMaterial({ experiences = "", feelings = "", self = "" } = {}) {
+  const sections = [];
+  const lived = stripCorePrinciples(experiences).slice(0, 6500).trim();
+  const felt = String(feelings || "").slice(0, 1800).trim();
+  const identity = currentSelfMaterial(self).slice(0, 2200).trim();
+  if (lived) sections.push(`【经历碎片】\n${lived}`);
+  if (felt && !/(?:没有找到|没有符合|暂无(?:相关)?感受|no matching)/i.test(felt)) {
+    sections.push(`【相关感受】\n${felt}`);
+  }
+  if (identity && !/还没有任何自我认知记录/.test(identity)) {
+    sections.push(`【自我认识】\n${identity}`);
+  }
+  return sections.join("\n\n").slice(0, 10000);
+}
+
 function parseDream(text) {
   const raw = String(text || "").trim();
   let value;
@@ -117,13 +154,13 @@ async function runDreamCycle(options) {
   saveState({ night, selected, status: selected ? "attempted" : "skipped", decided_at: now.toISOString() });
   if (!selected) return { ran: false, reason: "probability_skipped", night };
 
+  const conversation = conversationMaterial(messages);
   let memory = "";
   try {
-    memory = String(await readMemory()).slice(0, 10000);
+    memory = String(await readMemory({ conversation })).slice(0, 10000);
   } catch (error) {
     logger.warn?.(JSON.stringify({ event: "dream_memory_unavailable", error: String(error.message || error) }));
   }
-  const conversation = conversationMaterial(messages);
   if (!memory && !conversation) return { ran: false, reason: "no_material", night };
   try {
     const result = await requestDream({
@@ -150,5 +187,5 @@ async function runDreamCycle(options) {
   }
 }
 
-module.exports = { DEFAULT_DREAM_STYLE_PROMPT, buildDreamMessages, conversationMaterial, dreamNight, parseDream, requestDream, runDreamCycle };
+module.exports = { DEFAULT_DREAM_STYLE_PROMPT, buildDreamMessages, conversationMaterial, currentSelfMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, parseDream, requestDream, runDreamCycle, stripCorePrinciples };
 

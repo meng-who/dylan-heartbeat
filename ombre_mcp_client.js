@@ -1,4 +1,11 @@
-const READ_ONLY_TOOLS = new Set(["breath", "breath_search", "breath_advanced"]);
+const READ_ONLY_TOOLS = new Set(["breath", "breath_search", "breath_advanced", "feel", "I"]);
+
+function isReadOnlyInvocation(name, args) {
+  if (!READ_ONLY_TOOLS.has(name)) return false;
+  if (name !== "I") return true;
+  const keys = Object.keys(args || {});
+  return args?.read === true && keys.every(key => ["read", "limit"].includes(key));
+}
 
 function normalizeMcpUrl(value) {
   const url = new URL(String(value || "").trim());
@@ -73,7 +80,7 @@ class OmbreMcpClient {
   }
 
   async callReadTool(name, args = {}) {
-    if (!READ_ONLY_TOOLS.has(name)) throw new Error(`Solo 不允许调用写工具：${name}`);
+    if (!isReadOnlyInvocation(name, args)) throw new Error(`不允许通过只读客户端调用写操作：${name}`);
     await this.initialize();
     const result = await this.post("tools/call", { name, arguments: args });
     if (result?.isError) throw new Error(`Ombre 工具 ${name} 返回错误`);
@@ -100,4 +107,4 @@ function hasRecallEvidence(value) {
   return !/(?:没有找到|没有符合|暂无(?:相关)?记忆|记忆库(?:为空|里没有)|no (?:matching|relevant) memor)/i.test(text);
 }
 
-module.exports = { OmbreMcpClient, READ_ONLY_TOOLS, hasRecallEvidence, normalizeMcpUrl, parseMcpPayload };
+module.exports = { OmbreMcpClient, READ_ONLY_TOOLS, hasRecallEvidence, isReadOnlyInvocation, normalizeMcpUrl, parseMcpPayload };

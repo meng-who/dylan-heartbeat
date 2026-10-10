@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildDreamMessages, conversationMaterial, dreamNight, requestDream, runDreamCycle } = require("../dream_runtime");
+const { buildDreamMessages, conversationMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, requestDream, runDreamCycle } = require("../dream_runtime");
 
 const timeZone = "Asia/Shanghai";
 const now = new Date("2026-10-10T15:30:00.000Z");
@@ -130,5 +130,25 @@ test("automation records are excluded from dream conversation material", () => {
   ]);
   assert.match(text, /桥/);
   assert.doesNotMatch(text, /隐私摘要|读了一本书|旧梦/);
+});
+
+test("dream memory excludes pinned principles and keeps feelings and self knowledge", () => {
+  const material = dreamMemoryMaterial({
+    experiences: "=== 核心准则 ===\n📌 永远诚实\n\n=== 浮现记忆 ===\n雨夜里错过了一班车。",
+    feelings: "想到离别时，会有一点不舍。",
+    self: "=== 我的自我认知（1 条）===\n我习惯先照顾别人的感受。\n\n=== 已经被取代的（1 条）===\n我从不在意别人。\n\n=== 正在沉淀的「我觉得」（1 条）===\n我也许正在学习表达需要。"
+  });
+  assert.doesNotMatch(material, /永远诚实|核心准则/);
+  assert.match(material, /雨夜里错过了一班车/);
+  assert.match(material, /想到离别时/);
+  assert.match(material, /我习惯先照顾/);
+  assert.match(material, /学习表达需要/);
+  assert.doesNotMatch(material, /我从不在意别人/);
+});
+
+test("recent conversation becomes a bounded recall query", () => {
+  const query = dreamRecallQuery("用户：今天看见一座桥。\nAI：你说那让你想起小时候。");
+  assert.equal(query, "今天看见一座桥。 你说那让你想起小时候。");
+  assert.ok(query.length <= 300);
 });
 
