@@ -359,7 +359,7 @@ WAKE_DAY_END_HOUR=24
 
 需要立刻检查生成质量时，可以打开 `/admin`，在 **Dream Preview** 中点击“立即做一个测试梦”。这个入口使用和正式梦境完全相同的 Ombre 取材、Prompt、模型与归档流程，只跳过时间窗口、空闲时长、概率和当晚判定。生成的全文会直接显示在管理页并写入加密 Archive，短概要也会作为梦境事件进入下一次聊天上下文。
 
-推荐使用硅基流动的免费 `THUDM/GLM-4-9B-0414`。在 Render 中配置：
+推荐使用 Google Gemini API 免费层的 `gemini-3.8-flash`。Render 的境外运行区域可直接访问，无需配置代理。在 Render 中配置：
 
 ```env
 DREAM_ENABLED=false
@@ -367,16 +367,16 @@ DREAM_PROBABILITY=0.35
 DREAM_IDLE_MINUTES=120
 DREAM_START_HOUR=22
 DREAM_END_HOUR=8
-DREAM_PROVIDER=siliconflow
-DREAM_MODEL_NAME=THUDM/GLM-4-9B-0414
-SILICONFLOW_API_KEY=你的硅基流动API密钥
+DREAM_PROVIDER=gemini
+DREAM_MODEL_NAME=gemini-3.8-flash
+GEMINI_API_KEY=你的Google AI Studio API密钥
 MAX_INJECTED_DREAM_EVENTS=2
 OMBRE_MCP_URL=https://你的-ombre服务.onrender.com/mcp
 OMBRE_MCP_TOKEN=你的Ombre静态Token
 WAKE_ARCHIVE_KEY=现有的32字节Base64URL密钥
 ```
 
-确认密钥和免费模型可用后，把 `DREAM_ENABLED` 改为 `true`。如果以后切回智谱，把 `DREAM_PROVIDER` 改成 `bigmodel`，填写 `BIGMODEL_API_KEY`，并换成智谱模型名；旧部署仍兼容原来的智谱变量。密钥只存 Render Secret，不要提交 GitHub。`DREAM_PROBABILITY=0` 表示永远不抽中，`1` 表示每个符合条件的夜晚都尝试；这不是生成成功率，也不会保证某一晚一定有梦。`DREAM_START_HOUR` 和 `DREAM_END_HOUR` 按 `TIME_ZONE` 控制可做梦时段，可以跨午夜；小时通常取 0 至 23，`24` 会按 `0` 处理。程序内置了增强版梦境 Prompt，不需要配置 `DREAM_STYLE_PROMPT`；只有想临时修改梦的口吻、氛围或叙事习惯时才添加它。JSON 输出格式、素材边界和梦境标记始终由程序固定保护。`MAX_INJECTED_DREAM_EVENTS=2` 表示后续聊天最多注入最近两次梦的短概要，完整梦境始终只保存在加密 Archive 中。
+确认密钥和免费模型可用后，把 `DREAM_ENABLED` 改为 `true`。如果以后切换提供商，可将 `DREAM_PROVIDER` 设为 `bigmodel` 或 `siliconflow`，再填写对应的 `BIGMODEL_API_KEY` 或 `SILICONFLOW_API_KEY` 和模型名；旧部署仍兼容原来的变量。密钥只存 Render Secret，不要提交 GitHub。`DREAM_PROBABILITY=0` 表示永远不抽中，`1` 表示每个符合条件的夜晚都尝试；这不是生成成功率，也不会保证某一晚一定有梦。`DREAM_START_HOUR` 和 `DREAM_END_HOUR` 按 `TIME_ZONE` 控制可做梦时段，可以跨午夜；小时通常取 0 至 23，`24` 会按 `0` 处理。程序内置了增强版梦境 Prompt，不需要配置 `DREAM_STYLE_PROMPT`；只有想临时修改梦的口吻、氛围或叙事习惯时才添加它。JSON 输出格式、素材边界和梦境标记始终由程序固定保护。`MAX_INJECTED_DREAM_EVENTS=2` 表示后续聊天最多注入最近两次梦的短概要，完整梦境始终只保存在加密 Archive 中。
 
 ## 🌙 Solo AI（独处事件）
 

@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildDreamMessages, conversationMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, readDreamMemory, requestDream, resolveDreamModelConfig, runDreamCycle } = require("../dream_runtime");
+const { buildDreamMessages, conversationMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, isTransientModelBusy, readDreamMemory, requestDream, resolveDreamModelConfig, runDreamCycle } = require("../dream_runtime");
 
 const timeZone = "Asia/Shanghai";
 const now = new Date("2026-10-10T15:30:00.000Z");
@@ -134,6 +134,41 @@ test("SiliconFlow dream config and request use the OpenAI-compatible endpoint", 
       };
     }
   });
+});
+
+test("Gemini dream config uses minimal reasoning on Google's compatible endpoint", async () => {
+  const config = resolveDreamModelConfig({
+    DREAM_PROVIDER: "gemini",
+    DREAM_MODEL_NAME: "gemini-3.8-flash",
+    GEMINI_API_KEY: "gemini-key"
+  });
+  assert.equal(config.provider, "gemini");
+  assert.equal(config.endpoint, "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions");
+  assert.equal(config.apiKey, "gemini-key");
+  await requestDream({
+    ...config,
+    messages: [{ role: "user", content: "做一个梦" }],
+    fetchImpl: async (url, options) => {
+      assert.equal(url, config.endpoint);
+      assert.equal(options.headers.authorization, "Bearer gemini-key");
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, "gemini-3.8-flash");
+      assert.equal(body.reasoning_effort, "minimal");
+      assert.equal(body.max_tokens, 2400);
+      assert.equal(body.thinking, undefined);
+      return {
+        ok: true,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({ choices: [{ message: { content: "我站在一座没有屋顶的旧房子里，月光落进每个空房间。桌上的蓝色杯子盛着一小片会呼吸的云，我轻轻吹了一口气，云便沿着走廊飘远，替每扇关着的门点亮一盏灯。" } }] })
+      };
+    }
+  });
+});
+
+test("Gemini retries temporary quota and unavailable responses", () => {
+  assert.equal(isTransientModelBusy(429, "{}", "gemini"), true);
+  assert.equal(isTransientModelBusy(503, "{}", "gemini"), true);
+  assert.equal(isTransientModelBusy(402, "{}", "gemini"), false);
 });
 
 test("dream request retries only BigModel temporary overloads", async () => {
