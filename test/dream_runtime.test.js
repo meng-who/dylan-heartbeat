@@ -119,6 +119,7 @@ test("default dream prompt does not mistake the project name for the AI name", (
   const messages = buildDreamMessages("一只杯子", "AI：晚安");
   assert.doesNotMatch(messages[0].content, /Dylan/);
   assert.match(messages[0].content, /做梦者自己的第一人称/);
+  assert.match(messages[0].content, /不要刻意生成噩梦/);
 });
 
 test("automation records are excluded from dream conversation material", () => {
@@ -130,6 +131,18 @@ test("automation records are excluded from dream conversation material", () => {
   ]);
   assert.match(text, /桥/);
   assert.doesNotMatch(text, /隐私摘要|读了一本书|旧梦/);
+});
+
+test("dream conversation keeps the latest thirty real messages", () => {
+  const messages = Array.from({ length: 35 }, (_, index) => ({
+    role: index % 2 ? "assistant" : "user",
+    content: `对话-${index + 1}`
+  }));
+  const text = conversationMaterial(messages);
+  assert.doesNotMatch(text, /对话-[1-5](?:\D|$)/);
+  assert.match(text, /对话-6/);
+  assert.match(text, /对话-35/);
+  assert.ok(text.length <= 7000);
 });
 
 test("dream memory excludes pinned principles and keeps feelings and self knowledge", () => {
