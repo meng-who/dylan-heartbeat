@@ -363,14 +363,14 @@ DREAM_START_HOUR=22
 DREAM_END_HOUR=8
 DREAM_MODEL_NAME=glm-4.7-flash
 BIGMODEL_API_KEY=你的智谱 BigModel API 密钥
-DREAM_STYLE_PROMPT=只用自然中文、第一人称。梦可以跳跃、错置、把情绪变成景象，但要保持含蓄、具体、有感官细节。
+DREAM_STYLE_PROMPT=以 Dylan 的第一人称写梦。不要按时间顺序复述素材，也不必使用全部线索；从记忆与近期对话中挑选少量情绪浓度高、彼此距离较远的碎片，让人物、地点、物件和时间自由移位、融合或变形。让情绪真实，因果与物理规律可以松动；用具体的光线、声音、触感、气味和空间变化承载情绪，不直接分析或解释象征含义。梦应像亲历的片段，而不是总结、日记或寓言，至少出现一次意外但自然的转场。避免照抄原句、罗列素材、整齐升华或给出结论。只用自然中文，保持含蓄、细腻和略带陌生感。
 MAX_INJECTED_DREAM_EVENTS=2
 OMBRE_MCP_URL=https://你的-ombre服务.onrender.com/mcp
 OMBRE_MCP_TOKEN=你的Ombre静态Token
 WAKE_ARCHIVE_KEY=现有的32字节Base64URL密钥
 ```
 
-确认密钥和免费模型可用后，把 `DREAM_ENABLED` 改为 `true`。密钥只存 Render Secret，不要提交 GitHub。`DREAM_PROBABILITY=0` 表示永远不抽中，`1` 表示每个符合条件的夜晚都尝试；这不是生成成功率，也不会保证某一晚一定有梦。`DREAM_START_HOUR` 和 `DREAM_END_HOUR` 按 `TIME_ZONE` 控制可做梦时段，小时取 0 至 23，可以跨午夜。`DREAM_STYLE_PROMPT` 可以随时在 Render 修改梦的口吻、氛围和叙事习惯；JSON 输出格式、素材边界和梦境标记仍由程序固定保护。`MAX_INJECTED_DREAM_EVENTS=2` 表示后续聊天最多注入最近两次梦的短概要，完整梦境始终只保存在加密 Archive 中。
+确认密钥和免费模型可用后，把 `DREAM_ENABLED` 改为 `true`。密钥只存 Render Secret，不要提交 GitHub。`DREAM_PROBABILITY=0` 表示永远不抽中，`1` 表示每个符合条件的夜晚都尝试；这不是生成成功率，也不会保证某一晚一定有梦。`DREAM_START_HOUR` 和 `DREAM_END_HOUR` 按 `TIME_ZONE` 控制可做梦时段，可以跨午夜；小时通常取 0 至 23，`24` 会按 `0` 处理。`DREAM_STYLE_PROMPT` 可以随时在 Render 修改梦的口吻、氛围和叙事习惯；JSON 输出格式、素材边界和梦境标记仍由程序固定保护。`MAX_INJECTED_DREAM_EVENTS=2` 表示后续聊天最多注入最近两次梦的短概要，完整梦境始终只保存在加密 Archive 中。
 
 ## 🌙 Solo AI（独处事件）
 

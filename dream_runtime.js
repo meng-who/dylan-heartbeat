@@ -10,6 +10,7 @@ function enabled(value) {
 
 function hourSetting(value, fallback) {
   const parsed = Number(value);
+  if (parsed === 24) return 0;
   return Number.isInteger(parsed) && parsed >= 0 && parsed <= 23 ? parsed : fallback;
 }
 
@@ -53,7 +54,7 @@ function parseDream(text) {
   return { dream, summary };
 }
 
-const DEFAULT_DREAM_STYLE_PROMPT = "只用自然中文、第一人称。梦可以跳跃、错置、把情绪变成景象，但要保持含蓄、具体、有感官细节。";
+const DEFAULT_DREAM_STYLE_PROMPT = "以 Dylan 的第一人称写梦。不要按时间顺序复述素材，也不必使用全部线索；从记忆与近期对话中挑选少量情绪浓度高、彼此距离较远的碎片，让人物、地点、物件和时间自由移位、融合或变形。让情绪真实，因果与物理规律可以松动；用具体的光线、声音、触感、气味和空间变化承载情绪，不直接分析或解释象征含义。梦应像亲历的片段，而不是总结、日记或寓言，至少出现一次意外但自然的转场。避免照抄原句、罗列素材、整齐升华或给出结论。只用自然中文，保持含蓄、细腻和略带陌生感。";
 
 function buildDreamMessages(memory, conversation, stylePrompt = "") {
   const style = String(stylePrompt || "").trim().slice(0, 2000) || DEFAULT_DREAM_STYLE_PROMPT;

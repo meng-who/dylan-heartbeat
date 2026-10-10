@@ -62,6 +62,11 @@ test("custom dream hours support a window across midnight", () => {
   assert.equal(dreamNight(new Date("2026-10-10T12:00:00Z"), timeZone, 23, 7), "");
 });
 
+test("hour 24 is accepted as midnight", () => {
+  assert.equal(dreamNight(new Date("2026-10-10T16:30:00Z"), timeZone, 24, 8), "2026-10-11");
+  assert.equal(dreamNight(new Date("2026-10-10T15:30:00Z"), timeZone, 24, 8), "");
+});
+
 test("a missed draw is recorded once and uses no model", async () => {
   const h = harness();
   assert.equal((await runDreamCycle(h.options)).reason, "probability_skipped");
