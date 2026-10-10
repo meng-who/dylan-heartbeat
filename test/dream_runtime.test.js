@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildDreamMessages, conversationMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, isTransientModelBusy, readDreamMemory, requestDream, resolveDreamModelConfig, runDreamCycle } = require("../dream_runtime");
+const { buildDreamMessages, conversationMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, fallbackDreamSummary, hasVerbatimConversationOverlap, isTransientModelBusy, isWeakDreamSummary, parseDream, readDreamMemory, requestDream, resolveDreamModelConfig, runDreamCycle } = require("../dream_runtime");
 
 const timeZone = "Asia/Shanghai";
 const now = new Date("2026-10-10T15:30:00.000Z");
@@ -39,7 +39,7 @@ function harness(overrides = {}) {
         text: async () => JSON.stringify({
           choices: [{ message: { content: JSON.stringify({
             dream: "我走过一条很长的走廊，门边的铃铛没有发声，蓝色杯子却在窗台上轻轻晃动。我伸手去拿，它忽然变成一小片海，潮水从指缝里慢慢退去。",
-            summary: "梦见门边的铃铛与变成海的蓝色杯子"
+            summary: "我穿过无声铃铛守着的走廊，追逐摇晃的蓝色杯子，最后目送它化成海水从指间退去。"
           }) } }]
         })
       };
@@ -136,10 +136,10 @@ test("SiliconFlow dream config and request use the OpenAI-compatible endpoint", 
   });
 });
 
-test("Gemini dream config uses minimal reasoning on Google's compatible endpoint", async () => {
+test("Gemini 2.5 Flash disables thinking on Google's compatible endpoint", async () => {
   const config = resolveDreamModelConfig({
     DREAM_PROVIDER: "gemini",
-    DREAM_MODEL_NAME: "gemini-3.8-flash",
+    DREAM_MODEL_NAME: "gemini-2.5-flash",
     GEMINI_API_KEY: "gemini-key"
   });
   assert.equal(config.provider, "gemini");
@@ -152,8 +152,8 @@ test("Gemini dream config uses minimal reasoning on Google's compatible endpoint
       assert.equal(url, config.endpoint);
       assert.equal(options.headers.authorization, "Bearer gemini-key");
       const body = JSON.parse(options.body);
-      assert.equal(body.model, "gemini-3.8-flash");
-      assert.equal(body.reasoning_effort, "minimal");
+      assert.equal(body.model, "gemini-2.5-flash");
+      assert.equal(body.reasoning_effort, "none");
       assert.equal(body.max_tokens, 2400);
       assert.equal(body.thinking, undefined);
       return {
@@ -165,10 +165,84 @@ test("Gemini dream config uses minimal reasoning on Google's compatible endpoint
   });
 });
 
+test("Gemini 3 models use supported low reasoning instead of minimal", async () => {
+  await requestDream({
+    apiKey: "gemini-key",
+    model: "gemini-3.8-flash",
+    provider: "gemini",
+    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    messages: [{ role: "user", content: "做一个梦" }],
+    fetchImpl: async (_url, options) => {
+      assert.equal(JSON.parse(options.body).reasoning_effort, "low");
+      return {
+        ok: true,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({ choices: [{ message: { content: "我沿着一条发光的小路走到海边，潮水把昨夜遗落的星星一颗颗送回脚边。我捡起其中最安静的一颗，它在掌心变成一盏温暖的小灯。远处的房屋像纸船一样缓慢漂过夜空，窗里的人影朝我挥手，却没有发出声音。等我回头时，小路已经长满白色的花，每一朵都轻轻念着一个似曾相识的名字。" } }] })
+      };
+    }
+  });
+});
+
 test("Gemini retries temporary quota and unavailable responses", () => {
   assert.equal(isTransientModelBusy(429, "{}", "gemini"), true);
   assert.equal(isTransientModelBusy(503, "{}", "gemini"), true);
   assert.equal(isTransientModelBusy(402, "{}", "gemini"), false);
+});
+
+test("dream request regenerates once when it copies recent dialogue verbatim", async () => {
+  const conversation = "用户：我把那只蓝色杯子留在窗边等清晨的第一束光";
+  let calls = 0;
+  const result = await requestDream({
+    apiKey: "test-key",
+    model: "gemini-2.5-flash",
+    provider: "gemini",
+    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    messages: buildDreamMessages("一条潮湿的走廊", conversation),
+    forbiddenVerbatimText: conversation,
+    fetchImpl: async (_url, options) => {
+      calls++;
+      const request = JSON.parse(options.body);
+      if (calls === 2) assert.match(request.messages.at(-1).content, /不得出现可从原对话中辨认出的连续原句/);
+      const content = calls === 1
+        ? { dream: "我站在一间没有屋顶的房子里，忽然清楚地说：我把那只蓝色杯子留在窗边等清晨的第一束光。话音落下，四周的门一扇扇漂到空中，雨水从门框里倒着流向云层。", summary: "我在无顶的房子里说出一句熟悉的话，随后门与雨水都漂向天空，房间最终沉入安静的云层。" }
+        : { dream: "我站在一间没有屋顶的房子里，窗台上有一小片蓝色的海。海水忽然沿墙壁向上流，托起所有门框，带它们穿过低低的云。我追到走廊尽头时，门后只剩一束温暖的晨光，照着手心里一枚湿润的贝壳。", summary: "我从无顶房屋里的蓝色小海出发，追随升空的门框穿过云层，最终在晨光中握住一枚湿润的贝壳。" };
+      return { ok: true, headers: { get: () => "application/json" }, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(content) } }] }) };
+    }
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.attempts, 2);
+  assert.equal(hasVerbatimConversationOverlap(result.dream, conversation), false);
+});
+
+test("dream request repairs a summary that only repeats the opening", async () => {
+  let calls = 0;
+  const dream = "我推开一扇长满苔藓的门，发现门后是一座漂浮在夜空中的车站。没有列车，只有一群透明的鸟沿轨道奔跑，翅膀发出雨点般的声音。站台忽然折叠成一艘小船，载着我穿过云层。天亮时，小船停在熟悉的窗前，我手里多了一张没有写字的车票。";
+  const result = await requestDream({
+    apiKey: "test-key",
+    model: "gemini-2.5-flash",
+    provider: "gemini",
+    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    messages: buildDreamMessages("苔藓和旧车站", "用户：昨晚下雨了"),
+    fetchImpl: async (_url, options) => {
+      calls++;
+      if (calls === 2) assert.match(JSON.parse(options.body).messages.at(-1).content, /保留 dream 正文原样不变/);
+      const summary = calls === 1
+        ? "我推开一扇长满苔藓的门，发现门后是一座漂浮在夜空中的车站。"
+        : "我进入漂浮夜空的车站，随折叠成船的站台穿过云层，天亮后回到熟悉窗前，并得到一张空白车票。";
+      return { ok: true, headers: { get: () => "application/json" }, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify({ dream, summary }) } }] }) };
+    }
+  });
+  assert.equal(calls, 2);
+  assert.match(result.summary, /天亮|窗前|车票/);
+  assert.equal(isWeakDreamSummary(result.dream, result.summary), false);
+});
+
+test("missing dream summary falls back to fragments from the whole dream", () => {
+  const dream = "我走进一间空教室，黑板上落满白色羽毛。窗外的操场慢慢变成海，课桌排成一列小船。最后我从远处的钟声里醒来，手中还握着一片羽毛。";
+  const parsed = parseDream(JSON.stringify({ dream }));
+  assert.equal(parsed.summary, fallbackDreamSummary(dream));
+  assert.match(parsed.summary, /最后|钟声|羽毛/);
+  assert.doesNotMatch(parsed.summary, /…$/);
 });
 
 test("dream request retries only BigModel temporary overloads", async () => {
