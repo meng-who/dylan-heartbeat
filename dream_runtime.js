@@ -132,27 +132,89 @@ function buildDreamMessages(memory, conversation, stylePrompt = "") {
   ];
 }
 
-async function requestDream({ apiKey, model, messages, fetchImpl = fetch, timeoutMs = 45000 }) {
-  const response = await fetchImpl("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
-    method: "POST",
-    signal: AbortSignal.timeout(timeoutMs),
-    headers: {
-      authorization: `Bearer ${apiKey}`,
-      "content-type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      stream: false,
-      max_tokens: 900,
-      temperature: 0.75,
-      thinking: { type: "disabled" }
-    })
-  });
-  const body = await response.text();
-  if (!response.ok) throw new Error(`梦境模型 HTTP ${response.status}: ${body.slice(0, 160)}`);
-  const parsed = parseChatCompletionResponse(body, response.headers?.get?.("content-type") || "");
-  return parseDream(parsed?.choices?.[0]?.message?.content);
+const DREAM_ENDPOINTS = {
+  bigmodel: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+  siliconflow: "https://api.siliconflow.cn/v1/chat/completions"
+};
+
+function resolveDreamModelConfig(env = process.env) {
+  const model = String(env.DREAM_MODEL_NAME || "").trim();
+  const requestedProvider = String(env.DREAM_PROVIDER || "").trim().toLowerCase();
+  const provider = requestedProvider || (env.SILICONFLOW_API_KEY && model.includes("/") ? "siliconflow" : "bigmodel");
+  if (!DREAM_ENDPOINTS[provider]) return { provider, model, apiKey: "", endpoint: "" };
+  const apiKey = provider === "siliconflow"
+    ? String(env.SILICONFLOW_API_KEY || "").trim()
+    : String(env.BIGMODEL_API_KEY || "").trim();
+  return { provider, model, apiKey, endpoint: DREAM_ENDPOINTS[provider] };
+}
+
+function isTransientModelBusy(status, body, provider = "bigmodel") {
+  if (Number(status) !== 429) return false;
+  if (provider === "siliconflow") return true;
+  try {
+    const parsed = JSON.parse(String(body || ""));
+    if (String(parsed?.error?.code || "") === "1305") return true;
+    return /当前访问量过大/.test(String(parsed?.error?.message || ""));
+  } catch {
+    return /当前访问量过大/.test(String(body || ""));
+  }
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function requestDream({
+  apiKey, model, messages, provider = "bigmodel", endpoint = DREAM_ENDPOINTS.bigmodel,
+  fetchImpl = fetch, timeoutMs = 90000,
+  maxAttempts = 4, retryDelaysMs = [4000, 12000, 25000], sleepImpl = sleep
+}) {
+  const attemptsLimit = Math.max(1, Math.min(4, Number(maxAttempts) || 4));
+  for (let attempt = 1; attempt <= attemptsLimit; attempt++) {
+    let response;
+    try {
+      const body = {
+        model,
+        messages,
+        stream: false,
+        max_tokens: 900,
+        temperature: 0.75
+      };
+      if (provider === "bigmodel") body.thinking = { type: "disabled" };
+      response = await fetchImpl(endpoint, {
+        method: "POST",
+        signal: AbortSignal.timeout(timeoutMs),
+        headers: {
+          authorization: `Bearer ${apiKey}`,
+          "content-type": "application/json"
+        },
+        body: JSON.stringify(body)
+      });
+    } catch (error) {
+      const timedOut = error?.name === "TimeoutError" || /aborted due to timeout|timed? out/i.test(String(error?.message || error));
+      if (timedOut && attempt < Math.min(attemptsLimit, 2)) {
+        const delay = Math.max(0, Number(retryDelaysMs[attempt - 1]) || 0);
+        await sleepImpl(delay);
+        continue;
+      }
+      if (timedOut) throw new Error(`梦境模型请求超时（已尝试 ${attempt} 次，每次等待 ${Math.round(timeoutMs / 1000)} 秒）`);
+      throw error;
+    }
+    const body = await response.text();
+    if (!response.ok) {
+      const busy = isTransientModelBusy(response.status, body, provider);
+      if (busy && attempt < attemptsLimit) {
+        const delay = Math.max(0, Number(retryDelaysMs[attempt - 1]) || 0);
+        await sleepImpl(delay);
+        continue;
+      }
+      const tried = busy ? `（已尝试 ${attempt} 次）` : "";
+      throw new Error(`梦境模型 HTTP ${response.status}${tried}: ${body.slice(0, 160)}`);
+    }
+    const parsed = parseChatCompletionResponse(body, response.headers?.get?.("content-type") || "");
+    return { ...parseDream(parsed?.choices?.[0]?.message?.content), attempts: attempt };
+  }
+  throw new Error("梦境模型请求未完成");
 }
 
 async function runDreamCycle(options) {
@@ -168,7 +230,8 @@ async function runDreamCycle(options) {
   if (!Number.isFinite(userTime) || now.getTime() - userTime < idleMs) {
     return { ran: false, reason: "not_idle" };
   }
-  if (!env.BIGMODEL_API_KEY || !env.DREAM_MODEL_NAME || !env.WAKE_ARCHIVE_KEY) {
+  const modelConfig = resolveDreamModelConfig(env);
+  if (!modelConfig.apiKey || !modelConfig.model || !modelConfig.endpoint || !env.WAKE_ARCHIVE_KEY) {
     return { ran: false, reason: "not_configured" };
   }
   if (loadState()?.night === night) return { ran: false, reason: "already_decided" };
@@ -189,8 +252,7 @@ async function runDreamCycle(options) {
   if (!memory && !conversation) return { ran: false, reason: "no_material", night };
   try {
     const result = await requestDream({
-      apiKey: env.BIGMODEL_API_KEY,
-      model: env.DREAM_MODEL_NAME,
+      ...modelConfig,
       messages: buildDreamMessages(memory, conversation, env.DREAM_STYLE_PROMPT),
       fetchImpl
     });
@@ -212,5 +274,5 @@ async function runDreamCycle(options) {
   }
 }
 
-module.exports = { DEFAULT_DREAM_STYLE_PROMPT, buildDreamMessages, conversationMaterial, currentSelfMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, parseDream, readDreamMemory, requestDream, runDreamCycle, stripCorePrinciples };
+module.exports = { DEFAULT_DREAM_STYLE_PROMPT, buildDreamMessages, conversationMaterial, currentSelfMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, isTransientModelBusy, parseDream, readDreamMemory, requestDream, resolveDreamModelConfig, runDreamCycle, stripCorePrinciples };
 

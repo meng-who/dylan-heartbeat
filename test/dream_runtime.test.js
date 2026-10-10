@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildDreamMessages, conversationMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, readDreamMemory, requestDream, runDreamCycle } = require("../dream_runtime");
+const { buildDreamMessages, conversationMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, readDreamMemory, requestDream, resolveDreamModelConfig, runDreamCycle } = require("../dream_runtime");
 
 const timeZone = "Asia/Shanghai";
 const now = new Date("2026-10-10T15:30:00.000Z");
@@ -106,6 +106,108 @@ test("dream request uses BigModel Flash without thinking", async () => {
     }
   });
   assert.equal(requested, true);
+});
+
+test("SiliconFlow dream config and request use the OpenAI-compatible endpoint", async () => {
+  const config = resolveDreamModelConfig({
+    DREAM_PROVIDER: "siliconflow",
+    DREAM_MODEL_NAME: "THUDM/GLM-4-9B-0414",
+    SILICONFLOW_API_KEY: "sf-key",
+    BIGMODEL_API_KEY: "old-key"
+  });
+  assert.equal(config.provider, "siliconflow");
+  assert.equal(config.endpoint, "https://api.siliconflow.cn/v1/chat/completions");
+  assert.equal(config.apiKey, "sf-key");
+  await requestDream({
+    ...config,
+    messages: [{ role: "user", content: "做一个梦" }],
+    fetchImpl: async (url, options) => {
+      assert.equal(url, "https://api.siliconflow.cn/v1/chat/completions");
+      assert.equal(options.headers.authorization, "Bearer sf-key");
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, "THUDM/GLM-4-9B-0414");
+      assert.equal(body.thinking, undefined);
+      return {
+        ok: true,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({ choices: [{ message: { content: "我走进一片倒映月亮的浅海，鞋底每一步都响起很远的钟声。蓝色杯子浮在水面，杯沿长出细小的白花。我把它捧起来，海便安静地缩进掌心，像一段刚刚想起又说不清的往事。" } }] })
+      };
+    }
+  });
+});
+
+test("dream request retries only BigModel temporary overloads", async () => {
+  let calls = 0;
+  const delays = [];
+  const result = await requestDream({
+    apiKey: "test-key",
+    model: "glm-4.7-flash",
+    messages: [{ role: "user", content: "做一个梦" }],
+    retryDelaysMs: [4, 12, 25],
+    sleepImpl: async delay => { delays.push(delay); },
+    fetchImpl: async () => {
+      calls++;
+      if (calls < 3) return {
+        ok: false,
+        status: 429,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({ error: { code: "1305", message: "该模型当前访问量过大，请您稍后再试" } })
+      };
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({ choices: [{ message: { content: "我走进一间被月光浸湿的旧车站，空荡的站台缓慢漂到云上。远处有人摇响铃铛，一只蓝色杯子沿铁轨滚来，里面盛着安静的海。我俯身触碰水面，童年的影子从波纹里抬头，又化成一群发亮的鸟飞向夜色。" } }] })
+      };
+    }
+  });
+  assert.equal(calls, 3);
+  assert.deepEqual(delays, [4, 12]);
+  assert.equal(result.attempts, 3);
+});
+
+test("dream request does not retry unrelated 429 errors", async () => {
+  let calls = 0;
+  await assert.rejects(() => requestDream({
+    apiKey: "test-key",
+    model: "glm-4.7-flash",
+    messages: [{ role: "user", content: "做一个梦" }],
+    sleepImpl: async () => { throw new Error("should not sleep"); },
+    fetchImpl: async () => {
+      calls++;
+      return { ok: false, status: 429, headers: { get: () => "application/json" }, text: async () => '{"error":{"code":"1113","message":"余额不足"}}' };
+    }
+  }), /HTTP 429/);
+  assert.equal(calls, 1);
+});
+
+test("dream request retries one timeout with a longer per-request window", async () => {
+  let calls = 0;
+  const result = await requestDream({
+    apiKey: "test-key",
+    model: "glm-4.7-flash",
+    messages: [{ role: "user", content: "做一个梦" }],
+    maxAttempts: 2,
+    retryDelaysMs: [0],
+    sleepImpl: async () => {},
+    fetchImpl: async (_url, options) => {
+      calls++;
+      assert.equal(options.signal.aborted, false);
+      if (calls === 1) {
+        const error = new Error("The operation was aborted due to timeout");
+        error.name = "TimeoutError";
+        throw error;
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({ choices: [{ message: { content: "我沿着铺满月光的楼梯向下走，尽头却是一座漂在海上的小花园。风把旧信折成白鸟，停在一扇没有墙的窗上。我伸手时，窗外忽然下起温暖的雨，每一滴都映着一盏很远的灯。" } }] })
+      };
+    }
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.attempts, 2);
 });
 
 test("custom dream style is used without replacing fixed output rules", () => {
