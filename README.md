@@ -351,7 +351,7 @@ WAKE_DAY_END_HOUR=24
 
 梦境沿用 Heartbeat 的夜间检查，不需要另设 cron。北京时间 22:00 至次日 08:00、用户离开达到 `DREAM_IDLE_MINUTES` 后，每个夜晚只做一次概率判定。默认概率 `0.35`：即每晚有 35% 的机会尝试生成，没抽中就安静结束；频繁检查不会累积概率。重启后判定仍保存在 `DATA_DIR/dream_state.json`。默认关闭，所以部署代码不会让今晚自动做梦。
 
-抽中后，程序只读 Ombre Brain 的 `breath_advanced` 记忆桶，并选取近期真实对话；不会读取 Solo、Activity 或读书 Archive 作为素材。仅向智谱 BigModel 发送一次生成请求，不调用 Dylan 的主模型，也不会发送手机推送。梦的完整正文写进加密 Archive；下一次聊天只收到带“这是梦，不是真实发生的事”标记的短概要。模型或记忆服务失败时，那个夜晚不反复重试。
+抽中后，程序只读 Ombre Brain 的 `breath_advanced` 记忆桶，并选取近期真实对话；不会读取 Solo、Activity 或读书 Archive 作为素材。仅向智谱 BigModel 发送一次生成请求，不调用对话主模型，也不会发送手机推送。梦的完整正文写进加密 Archive；下一次聊天只收到带“这是梦，不是真实发生的事”标记的短概要。模型或记忆服务失败时，那个夜晚不反复重试。
 
 在 Render 中配置以下变量。`BIGMODEL_API_KEY` 从智谱 BigModel 开放平台获取；`glm-4.7-flash` 由智谱官方标为免费调用：
 
@@ -363,14 +363,13 @@ DREAM_START_HOUR=22
 DREAM_END_HOUR=8
 DREAM_MODEL_NAME=glm-4.7-flash
 BIGMODEL_API_KEY=你的智谱 BigModel API 密钥
-DREAM_STYLE_PROMPT=以 Dylan 的第一人称写梦。不要按时间顺序复述素材，也不必使用全部线索；从记忆与近期对话中挑选少量情绪浓度高、彼此距离较远的碎片，让人物、地点、物件和时间自由移位、融合或变形。让情绪真实，因果与物理规律可以松动；用具体的光线、声音、触感、气味和空间变化承载情绪，不直接分析或解释象征含义。梦应像亲历的片段，而不是总结、日记或寓言，至少出现一次意外但自然的转场。避免照抄原句、罗列素材、整齐升华或给出结论。只用自然中文，保持含蓄、细腻和略带陌生感。
 MAX_INJECTED_DREAM_EVENTS=2
 OMBRE_MCP_URL=https://你的-ombre服务.onrender.com/mcp
 OMBRE_MCP_TOKEN=你的Ombre静态Token
 WAKE_ARCHIVE_KEY=现有的32字节Base64URL密钥
 ```
 
-确认密钥和免费模型可用后，把 `DREAM_ENABLED` 改为 `true`。密钥只存 Render Secret，不要提交 GitHub。`DREAM_PROBABILITY=0` 表示永远不抽中，`1` 表示每个符合条件的夜晚都尝试；这不是生成成功率，也不会保证某一晚一定有梦。`DREAM_START_HOUR` 和 `DREAM_END_HOUR` 按 `TIME_ZONE` 控制可做梦时段，可以跨午夜；小时通常取 0 至 23，`24` 会按 `0` 处理。`DREAM_STYLE_PROMPT` 可以随时在 Render 修改梦的口吻、氛围和叙事习惯；JSON 输出格式、素材边界和梦境标记仍由程序固定保护。`MAX_INJECTED_DREAM_EVENTS=2` 表示后续聊天最多注入最近两次梦的短概要，完整梦境始终只保存在加密 Archive 中。
+确认密钥和免费模型可用后，把 `DREAM_ENABLED` 改为 `true`。密钥只存 Render Secret，不要提交 GitHub。`DREAM_PROBABILITY=0` 表示永远不抽中，`1` 表示每个符合条件的夜晚都尝试；这不是生成成功率，也不会保证某一晚一定有梦。`DREAM_START_HOUR` 和 `DREAM_END_HOUR` 按 `TIME_ZONE` 控制可做梦时段，可以跨午夜；小时通常取 0 至 23，`24` 会按 `0` 处理。程序内置了增强版梦境 Prompt，不需要配置 `DREAM_STYLE_PROMPT`；只有想临时修改梦的口吻、氛围或叙事习惯时才添加它。JSON 输出格式、素材边界和梦境标记始终由程序固定保护。`MAX_INJECTED_DREAM_EVENTS=2` 表示后续聊天最多注入最近两次梦的短概要，完整梦境始终只保存在加密 Archive 中。
 
 ## 🌙 Solo AI（独处事件）
 
