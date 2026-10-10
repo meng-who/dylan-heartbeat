@@ -427,6 +427,7 @@ ADMIN_SESSION_DAYS=180
 - Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
 - `FORUM_MCP_URL`：填写 AISay 完整的自动登录 MCP 地址，供论坛潜水与书店阅读共同使用。地址已经包含 `?token=...` 时，`FORUM_MCP_TOKEN` 留空即可；它属于密钥，只放 Render Secret，不要提交到 GitHub。
 - `GALATEA_MCP_TOKEN`：只填写原始 token，客户端会自动生成 `Authorization: Bearer <token>`；不要把 `Bearer ` 前缀重复写入变量，也不要提交到 GitHub。
+- `/admin/activity/nostos-test`：使用现有 Galatea 连接只读查看雾潮群岛的 `actions` 页面和三项工具契约；加上 `?view=help` 可查看玩法说明。不会开局或提交行动。
 
 Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CHECK_INTERVAL_MINUTES` 或普通唤醒阈值影响。它与 Wake/Solo 恰好撞车时只会跳过这一次条件检查，稍后按自己的频率重试，避免同时调用两个模型。
 

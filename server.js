@@ -1799,6 +1799,44 @@ app.get("/admin/activity/galatea-test", { preHandler: basicAuth }, async (req, r
     return reply.code(502).send({ ok: false, error: error.message });
   }
 });
+// Read-only Nostos inspection through the existing Galatea MCP connection.
+app.get("/admin/activity/nostos-test", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  if (!process.env.GALATEA_MCP_URL || !process.env.GALATEA_MCP_TOKEN) {
+    return reply.code(503).send({ ok: false, error: "GALATEA_MCP_URL 或 GALATEA_MCP_TOKEN 未配置" });
+  }
+  const view = String(req.query?.view || "actions").trim();
+  if (!["actions", "help", "status", "notices"].includes(view)) {
+    return reply.code(400).send({ ok: false, error: "view 只支持 actions、help、status、notices" });
+  }
+  try {
+    const client = new RemoteMcpClient({
+      url: process.env.GALATEA_MCP_URL,
+      token: process.env.GALATEA_MCP_TOKEN,
+      timeoutMs: Number(process.env.GALATEA_MCP_TIMEOUT_MS) || 20_000,
+      clientName: "dylan-nostos-activity-test"
+    });
+    const tools = await client.listTools();
+    const required = ["nostos_start", "nostos_status", "nostos_act"];
+    const missing = required.filter(name => !tools.some(tool => tool.name === name));
+    if (missing.length) return reply.code(502).send({ ok: false, required, missing });
+    const page = await client.callTool("nostos_status", { view });
+    return reply.send({
+      ok: true,
+      view,
+      tools: tools.filter(tool => required.includes(tool.name)).map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        input_schema: tool.inputSchema || {}
+      })),
+      page: page.structuredContent || page.content || page,
+      next_view_url: view === "actions" ? "/admin/activity/nostos-test?view=help" : ""
+    });
+  } catch (error) {
+    req.log.error({ event: "nostos_activity_mcp_test_failed", error: error.message });
+    return reply.code(502).send({ ok: false, view, error: error.message });
+  }
+});
 // Read-only connection check: it lists available games but never starts a game or touches the account.
 app.get("/admin/activity/games-test", { preHandler: basicAuth }, async (req, reply) => {
   setArchivePrivacyHeaders(reply);
