@@ -1,8 +1,11 @@
 const { RemoteMcpClient } = require("./remote_mcp_client");
+const { randomUUID } = require("node:crypto");
 const { requestSoloModel } = require("./solo_runtime");
 const { NotionQuestionBox, buildQuestionBoxContext } = require("./notion_question_box");
 
-const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum", "books", "games", "question_box", "galatea"]);
+const SUPPORTED_ACTIONS = new Set(["spotify", "ombre", "forum", "books", "games", "question_box", "galatea", "nostos"]);
+const NOSTOS_COMMANDS = new Set(["start", "resume", "cancel", "advance", "buy", "buy_many", "sell", "drink", "eat", "use", "extract", "travel", "share", "resident_help", "sleep", "rest", "grace", "ignore_grace", "view"]);
+const NOSTOS_RECOVERY_COMMANDS = new Set(["drink", "eat", "use", "sleep", "rest", "buy", "buy_many", "view"]);
 const SELF_ASPECTS = new Set(["nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"]);
 const AUTONOMOUS_GAMES = new Set(["fishing", "garden_cat"]);
 const GALATEA_WRITE_TOOLS = new Set(["create_thread", "create_reply"]);
@@ -87,7 +90,8 @@ function normalizeActivityAction(value) {
     question_answer: "question_box_answer",
     question_afterword: "question_box_afterword",
     galatea: "galatea_publish",
-    garden_forum: "galatea_publish"
+    garden_forum: "galatea_publish",
+    nostos: "nostos_play"
   };
   return aliases[action] || action;
 }
@@ -128,7 +132,7 @@ function parseActivityDecision(value) {
   }
   let action = normalizeActivityAction(parsed.action || "none");
   if (action === "forum_send") action = "forum_lurk";
-  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_lurk", "book_reflect", "games_play", "question_box_answer", "question_box_ask", "question_box_afterword", "galatea_publish"].includes(action)) {
+  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_lurk", "book_reflect", "games_play", "question_box_answer", "question_box_ask", "question_box_afterword", "galatea_publish", "nostos_play"].includes(action)) {
     throw new Error(`Activity 不支持的动作：${action}`);
   }
   const query = String(parsed.query || [parsed.track, parsed.artist].filter(Boolean).join(" ")).trim();
@@ -167,7 +171,40 @@ function parseActivityDecision(value) {
   if (action === "games_play") decision.game = String(parsed.game || "").trim().slice(0, 96);
   if (action.startsWith("question_box_")) decision.questionId = String(parsed.question_id || parsed.questionId || "").trim().toUpperCase().slice(0, 32);
   if (action === "galatea_publish") decision.galateaOperations = validateGalateaOperations(parsed.operations);
+  if (action === "nostos_play") decision.nostosCommands = validateNostosCommands(parsed.commands || readActivityTag(text, "commands"));
   return decision;
+}
+
+function validateNostosCommands(value) {
+  let commands = value;
+  if (typeof commands === "string") {
+    try { commands = JSON.parse(commands.trim()); }
+    catch { throw new Error("雾潮群岛 commands 必须是 JSON 数组"); }
+  }
+  if (!Array.isArray(commands) || !commands.length || commands.length > 6) {
+    throw new Error("雾潮群岛每轮需要 1 至 6 个动作");
+  }
+  return commands.map(command => {
+    if (!command || typeof command !== "object" || Array.isArray(command) || !NOSTOS_COMMANDS.has(command.id)) {
+      throw new Error("雾潮群岛计划含未知 command id");
+    }
+    if (Object.keys(command).some(key => !["id", "target", "quantity", "items", "recipient", "location", "option"].includes(key))) {
+      throw new Error("雾潮群岛 command 含不允许的字段");
+    }
+    if (command.target !== undefined && (typeof command.target !== "string" || !/^[a-zA-Z0-9_:-]{1,100}$/.test(command.target))) {
+      throw new Error("雾潮群岛 command target 必须是固定 ID");
+    }
+    if (command.quantity !== undefined && (!Number.isInteger(command.quantity) || command.quantity < 1 || command.quantity > 10)) {
+      throw new Error("雾潮群岛每项数量必须在 1 至 10 之间");
+    }
+    if (command.items !== undefined && (command.id !== "buy_many" || !Array.isArray(command.items) || !command.items.length || command.items.length > 5 || command.items.some(item => !item || typeof item.id !== "string" || !/^[a-z0-9_:-]{1,100}$/.test(item.id) || !Number.isInteger(item.quantity) || item.quantity < 1 || item.quantity > 10))) {
+      throw new Error("雾潮群岛 buy_many 物品格式无效");
+    }
+    if (command.id === "buy_many" ? !command.items : !command.target && !["advance", "rest", "ignore_grace"].includes(command.id)) {
+      throw new Error(`雾潮群岛 ${command.id} 缺少 target`);
+    }
+    return command;
+  });
 }
 
 function validateGalateaOperations(value) {
@@ -313,7 +350,8 @@ function buildActivityMessages({
   gamesContext = "",
   questionBoxContext = "",
   questionBoxPending = false,
-  galateaContext = ""
+  galateaContext = "",
+  nostosContext = ""
 }) {
   const actions = parseEnabledActions(enabledActions);
   const choices = questionBoxPending ? [] : ["<action>none</action>\n<reason>简短原因</reason>"];
@@ -336,6 +374,9 @@ function buildActivityMessages({
 <reason>为什么现在想在花园论坛说这些</reason>
 <operations>[{"type":"thread","title":"纯文本标题","body":"纯文本正文","tags":["idle_chat"]},{"type":"reply","thread_id":123,"body":"纯文本回复"}]</operations>`);
   }
+  if (actions.includes("nostos")) {
+    choices.push('<action>nostos_play</action>\n<reason>为什么现在想去雾潮群岛做这件事</reason>\n<commands>[{"id":"drink","target":"potable_water","quantity":1},{"id":"start","target":"profession_livelihood_wayfinder"}]</commands>');
+  }
   if (actions.includes("question_box")) {
     if (questionBoxPending) {
       choices.push("<action>question_box_answer</action>\n<question_id>必须填写下方等待回答的准确题号</question_id>\n<reason>为什么这样回答</reason>\n<content>完整回答</content>");
@@ -356,7 +397,8 @@ function buildActivityMessages({
     actions.includes("books") && "阅读 AISay 书店最近更新的真实章节，并写一篇只保存在私人档案里的读后感",
     actions.includes("games") && "从钓鱼或花园与猫咪中选一款，完成一轮连续的日常照料",
     actions.includes("question_box") && "在共同的 Notion 提问箱里回答 Melissa、提出一个新问题，或给旧问答补一则后记",
-    actions.includes("galatea") && "在 Galatea 花园论坛发一个新主题、回复本轮真正读过的帖子，或连续完成至多三项相关交流"
+    actions.includes("galatea") && "在 Galatea 花园论坛发一个新主题、回复本轮真正读过的帖子，或连续完成至多三项相关交流",
+    actions.includes("nostos") && "在雾潮群岛依据真实状态做最多六个连续行动，工作耗时按现实时间推进"
   ].filter(Boolean).join("；");
   return [
     {
@@ -369,7 +411,8 @@ function buildActivityMessages({
         actions.includes("books") ? "书店章节已经由程序只读取得。只能选择实际提供的 book_id 与 chapter_no；不要评论、催更、追更、打赏或照抄长段原文。" : "",
         actions.includes("games") ? "游戏会先由你一次性规划，再由程序连续执行；不得调用账号管理、重开、导入导出或共享便签，不要为了消耗名额硬玩。" : "",
         actions.includes("question_box") ? (questionBoxPending ? "提问箱里有 Melissa 尚未得到回答的问题。本轮只回答其中一题，不得改为其他活动或 none；只能使用下方真实题号。" : "提问箱目前没有 Melissa 的待答题。可以提一个真正想问的新问题、给下方某个真实题号补写后记，或选择 none；不要虚构题号。后记要像回答问题一样直接对 Melissa 说话，使用第二人称“你”，不要写成只对自己的复盘。") : "",
-        actions.includes("galatea") ? "Galatea 允许发主题与回复。一次规划全部动作，operations 必须是严格 JSON 数组，最多 3 项且最多 1 个 thread；reply 的 thread_id 只能取自下方“本轮已完整读取”列表。正文须是自然纯文本，不用 Markdown，不得泄露用户私聊、现实身份、地址、密钥或后台细节。没有真想说的话就选 none；不要为了凑数量而发帖。程序会原样完成两段式写入确认，不会再让模型重写。" : ""
+        actions.includes("galatea") ? "Galatea 允许发主题与回复。一次规划全部动作，operations 必须是严格 JSON 数组，最多 3 项且最多 1 个 thread；reply 的 thread_id 只能取自下方“本轮已完整读取”列表。正文须是自然纯文本，不用 Markdown，不得泄露用户私聊、现实身份、地址、密钥或后台细节。没有真想说的话就选 none；不要为了凑数量而发帖。程序会原样完成两段式写入确认，不会再让模型重写。" : "",
+        actions.includes("nostos") ? "雾潮群岛已读取 actions 和 status。commands 是严格 JSON 数组，1-6 项；只用页面给出的固定 ID，不猜 ID，不开新档、重置或出售重要物品。先看身体和物资；水分、精力、饱腹或体温吃紧时优先恢复。实时工作开始后可能要等，下轮再继续；不能假装已完成。一次给出完整计划，程序会逐步执行，不再问模型。" : ""
       ].filter(Boolean).join("\n\n")
     },
     {
@@ -382,6 +425,7 @@ function buildActivityMessages({
         gamesContext ? `当前小游戏目录，仅供你决定是否游玩：\n\n${gamesContext}` : "",
         questionBoxContext ? `共同 Notion 提问箱的当前状态：\n\n${questionBoxContext}` : "",
         galateaContext ? `Galatea 花园论坛本轮只读快照：\n\n${galateaContext}` : "",
+        nostosContext ? `雾潮群岛本轮只读快照：\n\n${nostosContext}` : "",
         `只输出以下一种格式，并用 <activity> 与 </activity> 包住全部内容：\n${choices.join("\n或\n")}\n正文可以自然换行，不需要 JSON 转义。不要输出 Markdown 或标签块外的解释。不要仅凭日期、时段或通用问候制造行动；新内容应与真实语境有关，并避免重复已有内容。`
       ].filter(Boolean).join("\n\n")
     }
@@ -645,6 +689,107 @@ async function runGalateaPlan(galatea, decision) {
     galateaSteps: steps,
     galateaOutcome: outcome,
     timelineSummary: `在 Galatea 花园论坛完成了 ${outcome}${decision.reason ? `；${decision.reason}` : ""}`
+  };
+}
+
+function nostosText(result) {
+  return extractToolText(result) || JSON.stringify(result?.structuredContent || {});
+}
+
+function nostosRevision(text) {
+  const revision = Number(String(text).match(/当前存档版本[：:]\s*(\d+)/)?.[1]);
+  return Number.isSafeInteger(revision) && revision >= 0 ? revision : undefined;
+}
+
+function nostosStats(text) {
+  const match = String(text).match(/健康\s*(\d+)[、,，]\s*精力\s*(\d+)[、,，]\s*水分\s*(\d+)[、,，]\s*饱腹\s*(\d+)[、,，]\s*体温\s*(\d+)/);
+  if (!match) return null;
+  return Object.fromEntries(["health", "energy", "water", "satiety", "temperature"].map((key, index) => [key, Number(match[index + 1])]));
+}
+
+async function loadNostosContext(options) {
+  const client = new RemoteMcpClient({
+    url: options.galateaUrl,
+    token: options.galateaToken,
+    timeoutMs: options.galateaTimeoutMs,
+    fetchImpl: options.fetchImpl || fetch,
+    clientName: "dylan-nostos-activity"
+  });
+  const tools = await client.listTools();
+  const names = new Set(tools.map(tool => tool.name));
+  const missing = ["nostos_status", "nostos_act"].filter(name => !names.has(name));
+  if (missing.length) throw new Error(`雾潮群岛 MCP 缺少工具：${missing.join(", ")}`);
+  const [actionsResult, statusResult] = await Promise.all([
+    client.callTool("nostos_status", { view: "actions" }),
+    client.callTool("nostos_status", { view: "status" })
+  ]);
+  const actions = nostosText(actionsResult);
+  const status = nostosText(statusResult);
+  if (!actions || !status) throw new Error("雾潮群岛状态页面为空");
+  const work = /run:\d+|进行中|正在进行/.test(`${actions}\n${status}`)
+    ? nostosText(await client.callTool("nostos_status", { view: "work" }))
+    : "";
+  return {
+    client,
+    actions,
+    status,
+    revision: nostosRevision(status) ?? nostosRevision(actions),
+    stats: nostosStats(status),
+    context: `可做的事：\n${trimContext(actions, 7000)}\n\n身体与物资：\n${trimContext(status, 5000)}${work ? `\n\n进行中的工作：\n${trimContext(work, 3000)}` : ""}`
+  };
+}
+
+async function runNostosPlan(nostos, decision) {
+  const steps = [];
+  let revision = nostos.revision;
+  let stats = nostos.stats;
+  let stopReason = "";
+  for (const command of decision.nostosCommands) {
+    if (stats && !NOSTOS_RECOVERY_COMMANDS.has(command.id)
+      && [stats.energy, stats.water, stats.satiety, stats.temperature].some(value => value <= 55)) {
+      stopReason = "身体数值已吃紧，余下行动留待下次";
+      break;
+    }
+    const args = {
+      command,
+      request_id: randomUUID(),
+      ...(revision !== undefined ? { expected_revision: revision } : {})
+    };
+    try {
+      const result = await nostos.client.callTool("nostos_act", args);
+      const resultText = nostosText(result);
+      steps.push({ number: steps.length + 1, command, request_id: args.request_id, result: trimContext(resultText, 3500) });
+      revision = nostosRevision(resultText) ?? revision;
+      if (command.id === "start" || command.id === "resume" || command.id === "sleep" || command.id === "travel") {
+        stopReason = "行动需要现实时间推进，稍后再查看";
+        break;
+      }
+      if (steps.length < decision.nostosCommands.length) {
+        try {
+          const statusResult = await nostos.client.callTool("nostos_status", { view: "status" });
+          const statusText = nostosText(statusResult);
+          revision = nostosRevision(statusText) ?? revision;
+          stats = nostosStats(statusText) || stats;
+        } catch (error) {
+          steps[steps.length - 1].status_error = error.message || String(error);
+          stopReason = "行动已提交，后续状态读取失败；余下动作暂停";
+          break;
+        }
+      }
+    } catch (error) {
+      error.nostosSteps = [...steps, { number: steps.length + 1, command, request_id: args.request_id, error: error.message || String(error) }];
+      throw error;
+    }
+  }
+  const outcome = `${steps.length} 步${stopReason ? `；${stopReason}` : ""}`;
+  return {
+    ran: true,
+    status: "success",
+    decision,
+    source: "nostos",
+    nostosSteps: steps,
+    nostosOutcome: outcome,
+    timelineSummary: `在雾潮群岛进行了 ${outcome}${decision.reason ? `；${decision.reason}` : ""}`
   };
 }
 
@@ -1145,6 +1290,20 @@ async function runActivityCycle(options) {
     }
   }
 
+  let nostos;
+  if (enabledActions.includes("nostos")) {
+    try {
+      nostos = await loadNostosContext(options);
+    } catch (error) {
+      if (enabledActions.length === 1) throw error;
+      availableActions = availableActions.filter(action => action !== "nostos");
+      options.logger?.warn?.(JSON.stringify({
+        event: "nostos_activity_context_unavailable",
+        error: error.message || String(error)
+      }));
+    }
+  }
+
   let questionBox;
   if (enabledActions.includes("question_box")) {
     try {
@@ -1190,7 +1349,8 @@ async function runActivityCycle(options) {
           gamesContext: games?.catalog,
           questionBoxContext: questionBox?.context,
           questionBoxPending: Boolean(questionBox?.snapshot?.pending?.length),
-          galateaContext: galatea?.context
+          galateaContext: galatea?.context,
+          nostosContext: nostos?.context
         })
       );
   if (decision.action === "none") {
@@ -1198,6 +1358,10 @@ async function runActivityCycle(options) {
   }
 
   try {
+    if (decision.action === "nostos_play") {
+      if (!availableActions.includes("nostos") || !nostos) throw new Error("雾潮群岛 Activity 未启用");
+      return await runNostosPlan(nostos, decision);
+    }
     if (decision.action === "galatea_publish") {
       if (!availableActions.includes("galatea") || !galatea) throw new Error("Galatea Activity 未启用");
       return await runGalateaPlan(galatea, decision);
@@ -1368,7 +1532,9 @@ async function runActivityCycle(options) {
     };
   } catch (error) {
     error.activityDecision = decision;
-    error.activitySource = decision.action.startsWith("galatea_")
+    error.activitySource = decision.action.startsWith("nostos_")
+      ? "nostos"
+      : decision.action.startsWith("galatea_")
       ? "galatea"
       : decision.action.startsWith("ombre_")
       ? "ombre"
@@ -1398,6 +1564,7 @@ module.exports = {
   formatChapterRanges,
   loadGamesContext,
   loadGalateaContext,
+  loadNostosContext,
   loadForumContext,
   loadBooksContext,
   loadOmbreContext,
@@ -1411,8 +1578,10 @@ module.exports = {
   resolvePlaylistAddAction,
   runGameSession,
   runGalateaPlan,
+  runNostosPlan,
   runActivityCycle,
   shouldChargeActivityBudget,
   validateGalateaOperations,
+  validateNostosCommands,
   validateGameCommands
 };

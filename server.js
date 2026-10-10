@@ -1468,6 +1468,7 @@ function archivePageHtml() {
       if (item.game_name) details.push("游戏：" + item.game_name);
       if (item.game_outcome) details.push("结果：" + item.game_outcome);
       if (item.galatea_outcome) details.push("花园论坛：" + item.galatea_outcome);
+      if (item.nostos_outcome) details.push("雾潮群岛：" + item.nostos_outcome);
       if (item.question_id) details.push("提问箱：" + item.question_id);
       if (item.question_box_action) details.push("提问箱动作：" + item.question_box_action);
       if (item.kind === "activity") {
@@ -1516,6 +1517,20 @@ function archivePageHtml() {
         ].filter(Boolean).join("\\n")).join("\\n\\n");
         galateaSteps.append(node("div", "narrative-body", stepText));
         article.append(galateaSteps);
+      }
+      if (item.kind === "activity" && Array.isArray(item.nostos_steps) && item.nostos_steps.length) {
+        const nostosSteps = node("details", "narrative");
+        nostosSteps.append(node("summary", "", "查看雾潮群岛经过（" + item.nostos_steps.length + " 步）"));
+        const stepText = item.nostos_steps.map(step => [
+          "第 " + step.number + " 步：" + (step.command?.id || "行动"),
+          "参数：" + JSON.stringify(step.command || {}),
+          step.request_id ? "请求 ID：" + step.request_id : "",
+          step.result ? "返回：" + step.result : "",
+          step.status_error ? "后续状态：" + step.status_error : "",
+          step.error ? "错误：" + step.error : ""
+        ].filter(Boolean).join("\\n")).join("\\n\\n");
+        nostosSteps.append(node("div", "narrative-body", stepText));
+        article.append(nostosSteps);
       }
       const remove = node("button", "delete", "删除此条");
       remove.type = "button";

@@ -151,7 +151,9 @@ function readWakeArchive(options = {}) {
       record.question_id,
       record.question_box_action,
       record.galatea_outcome,
-      JSON.stringify(record.galatea_steps || [])
+      JSON.stringify(record.galatea_steps || []),
+      record.nostos_outcome,
+      JSON.stringify(record.nostos_steps || [])
     ].some(value => String(value || "").toLowerCase().includes(query));
   }).slice(0, limit);
 

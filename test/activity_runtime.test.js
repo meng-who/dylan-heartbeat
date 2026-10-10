@@ -14,10 +14,94 @@ const {
   parseGamePlan,
   requestActivityDecision,
   runActivityCycle,
+  runNostosPlan,
   shouldChargeActivityBudget,
   validateGalateaOperations,
-  validateGameCommands
+  validateGameCommands,
+  validateNostosCommands
 } = require("../activity_runtime");
+
+test("validates Nostos fixed-ID plans and rejects unsupported writes", () => {
+  assert.deepEqual(validateNostosCommands('[{"id":"start","target":"profession_livelihood_wayfinder"}]'), [
+    { id: "start", target: "profession_livelihood_wayfinder" }
+  ]);
+  assert.throws(() => validateNostosCommands([{ id: "new", target: "anything" }]), /未知 command/);
+  assert.throws(() => validateNostosCommands([{ id: "buy", target: "potable_water", quantity: 100 }]), /数量/);
+  assert.equal(parseActivityDecision('<activity><action>nostos_play</action><reason>做点活</reason><commands>[{"id":"start","target":"profession_livelihood_wayfinder"}]</commands></activity>').nostosCommands[0].id, "start");
+});
+
+test("Nostos plans with one model call and stops after a real-time job starts", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const toolResult = (id, value) => reply({ jsonrpc: "2.0", id, result: { content: [{ type: "text", text: value }] } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      return reply({ choices: [{ message: { content: '<activity><action>nostos_play</action><reason>今天想做点活</reason><commands>[{"id":"drink","target":"potable_water","quantity":1},{"id":"start","target":"profession_livelihood_wayfinder"},{"id":"start","target":"another_job"}]</commands></activity>' } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "nostos_status" }, { name: "nostos_act" }
+    ] } });
+    const name = body.params?.name;
+    const args = body.params?.arguments || {};
+    if (name === "nostos_status" && args.view === "actions") return toolResult(body.id, 'profession_livelihood_wayfinder｜现在就能动手。当前存档版本：3');
+    if (name === "nostos_status" && args.view === "status") {
+      const changed = calls.filter(call => call.body.params?.name === "nostos_act").length > 0;
+      return toolResult(body.id, `当前身体数值：健康100、精力83、水分${changed ? 85 : 80}、饱腹71、体温75。当前存档版本：${changed ? 4 : 3}`);
+    }
+    if (name === "nostos_act") return toolResult(body.id, `行动已提交。当前存档版本：${args.command.id === "drink" ? 4 : 5}`);
+    throw new Error("unexpected call");
+  };
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    enabledActions: ["nostos"],
+    galateaUrl: "https://galatea.test/mcp",
+    galateaToken: "secret",
+    fetchImpl
+  });
+  assert.equal(result.status, "success");
+  assert.equal(result.source, "nostos");
+  assert.equal(result.nostosSteps.length, 2);
+  assert.match(result.nostosOutcome, /现实时间/);
+  assert.equal(calls.filter(call => call.url === "https://model.test/v1/chat/completions").length, 1);
+  const writes = calls.filter(call => call.body.params?.name === "nostos_act").map(call => call.body.params.arguments);
+  assert.deepEqual(writes.map(item => item.expected_revision), [3, 4]);
+  assert.notEqual(writes[0].request_id, writes[1].request_id);
+});
+
+test("Nostos stops draining actions when body values are strained", async () => {
+  const calls = [];
+  const result = await runNostosPlan({
+    revision: 3,
+    stats: { energy: 83, water: 50, satiety: 71, temperature: 75 },
+    client: { callTool: async (...args) => { calls.push(args); throw new Error("should not write"); } }
+  }, { nostosCommands: [{ id: "start", target: "profession_livelihood_wayfinder" }] });
+  assert.equal(result.nostosSteps.length, 0);
+  assert.match(result.nostosOutcome, /吃紧/);
+  assert.equal(calls.length, 0);
+});
+
+test("Nostos keeps a confirmed write when the following status read fails", async () => {
+  const result = await runNostosPlan({
+    revision: 3,
+    stats: { energy: 83, water: 80, satiety: 71, temperature: 75 },
+    client: { callTool: async name => {
+      if (name === "nostos_act") return { content: [{ type: "text", text: "喝水成功。当前存档版本：4" }] };
+      throw new Error("temporary read outage");
+    } }
+  }, { nostosCommands: [
+    { id: "drink", target: "potable_water", quantity: 1 },
+    { id: "start", target: "profession_livelihood_wayfinder" }
+  ] });
+  assert.equal(result.status, "success");
+  assert.equal(result.nostosSteps.length, 1);
+  assert.match(result.nostosSteps[0].status_error, /temporary read outage/);
+  assert.ok(result.nostosSteps[0].request_id);
+});
 
 test("activity budget is independent from the ordinary wake threshold", () => {
   const now = new Date("2026-09-11T03:00:00.000Z");

@@ -1042,7 +1042,7 @@ async function runActivityCheck() {
   if (enabledActions.includes("forum") || enabledActions.includes("books")) required.push("FORUM_MCP_URL");
   if (enabledActions.includes("games")) required.push("GAMES_MCP_URL");
   if (enabledActions.includes("question_box")) required.push("NOTION_TOKEN", "NOTION_QUESTION_BOX_PAGE_ID");
-  if (enabledActions.includes("galatea")) required.push("GALATEA_MCP_URL", "GALATEA_MCP_TOKEN");
+  if (enabledActions.includes("galatea") || enabledActions.includes("nostos")) required.push("GALATEA_MCP_URL", "GALATEA_MCP_TOKEN");
   if (!enabledActions.length) {
     console.warn(JSON.stringify({ event: "activity_config_missing", variables: ["AUTONOMY_ACTIONS"] }));
     return { ran: false, reason: "not_configured" };
@@ -1210,7 +1210,8 @@ async function runActivityCheck() {
       finalModel: error.finalModel || "",
       gameName: error.gameName || "",
       gameSteps: error.gameSteps || [],
-      galateaSteps: error.galateaSteps || []
+      galateaSteps: error.galateaSteps || [],
+      nostosSteps: error.nostosSteps || []
     };
   }
 
@@ -1272,6 +1273,8 @@ async function runActivityCheck() {
     game_outcome: result.gameOutcome || "",
     galatea_steps: Array.isArray(result.galateaSteps) ? result.galateaSteps : [],
     galatea_outcome: result.galateaOutcome || "",
+    nostos_steps: Array.isArray(result.nostosSteps) ? result.nostosSteps : [],
+    nostos_outcome: result.nostosOutcome || "",
     question_box_action: result.questionBoxAction || "",
     question_id: result.questionId || result.decision?.questionId || "",
     reason: result.reason || "",
