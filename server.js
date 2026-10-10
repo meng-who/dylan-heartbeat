@@ -19,13 +19,16 @@ const {
   semanticPulseSseStream
 } = require("./pulse_sidecar");
 const { createUserActivityRecord, stampLatestUserActivity } = require("./timeline_activity");
-const { parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
+const { formatDateTimeInTimeZone, parseLeadingZonedTimestamp, resolveTimeZone } = require("./time_utils");
 const {
   DEFAULT_ARCHIVE_PATH,
+  appendWakeArchive,
   archiveConfigured,
   deleteWakeArchiveRecord,
   readWakeArchive
 } = require("./wake_archive");
+const { buildDreamMessages, conversationMaterial, readDreamMemory, requestDream } = require("./dream_runtime");
+const { OmbreMcpClient } = require("./ombre_mcp_client");
 const {
   addPulseOutputHeadroom,
   applyHttpResilience,
@@ -65,6 +68,7 @@ const IS_CLOUD_RUNTIME = Boolean(
 const TIMELINE_FILE = dataPath("enhanced_messages.json");
 const TIMESTAMP_DB_FILE = dataPath("message_timestamps.json");
 const USER_ACTIVITY_FILE = dataPath("last_user_activity.json");
+let manualDreamRunning = false;
 // 批注 2026-07-17：管理页保存 .env 后要让 PM2 刷新进程环境；保留原进程名，
 // 只补 --update-env，避免用户改完推送配置却继续运行旧值。
 const DEFAULT_RESTART_COMMAND = "self";
@@ -1148,6 +1152,76 @@ app.post("/internal/wake-event", async (req, reply) => {
   } catch (err) {
     console.error(err);
     reply.code(500).send({ error: err.message });
+  }
+});
+
+app.post("/admin/dream-test", { preHandler: basicAuth }, async (req, reply) => {
+  if (manualDreamRunning) return reply.code(409).send({ success: false, error: "已经有一个测试梦正在生成" });
+  if (!process.env.BIGMODEL_API_KEY || !process.env.DREAM_MODEL_NAME) {
+    return reply.code(400).send({ success: false, error: "请先配置 BIGMODEL_API_KEY 和 DREAM_MODEL_NAME" });
+  }
+  if (!archiveConfigured()) {
+    return reply.code(400).send({ success: false, error: "请先配置有效的 WAKE_ARCHIVE_KEY" });
+  }
+
+  manualDreamRunning = true;
+  try {
+    const timeline = loadTimeline();
+    const conversation = conversationMaterial(timeline);
+    let memory = "";
+    if (process.env.OMBRE_MCP_URL && process.env.OMBRE_MCP_TOKEN) {
+      const client = new OmbreMcpClient({
+        url: process.env.OMBRE_MCP_URL,
+        token: process.env.OMBRE_MCP_TOKEN,
+        timeoutMs: readPositiveIntegerEnv("OMBRE_MCP_TIMEOUT_MS", 12_000)
+      });
+      memory = await readDreamMemory({ client, conversation, logger: app.log });
+    }
+    if (!memory && !conversation) {
+      return reply.code(400).send({ success: false, error: "没有可用的 Ombre 记忆或真实对话素材" });
+    }
+
+    const result = await requestDream({
+      apiKey: process.env.BIGMODEL_API_KEY,
+      model: process.env.DREAM_MODEL_NAME,
+      messages: buildDreamMessages(memory, conversation, process.env.DREAM_STYLE_PROMPT)
+    });
+    const now = new Date();
+    const archived = appendWakeArchive({
+      kind: "dream",
+      status: "completed",
+      manual: true,
+      night: formatDateTimeInTimeZone(now, TIME_ZONE).slice(0, 10),
+      model: process.env.DREAM_MODEL_NAME,
+      dream: result.dream,
+      summary: result.summary,
+      memory_used: Boolean(memory),
+      conversation_used: Boolean(conversation)
+    });
+    if (!archived.saved) throw new Error("梦境加密归档失败");
+
+    let summaryInjected = false;
+    try {
+      appendSpecialEvent(`（${formatDateTimeInTimeZone(now, TIME_ZONE)} 梦境：${result.summary}。这是梦，不是真实发生的事。）`);
+      summaryInjected = true;
+    } catch (error) {
+      app.log.error({ err: error }, "测试梦概要写入时间线失败");
+    }
+    return reply.send({
+      success: true,
+      dream: result.dream,
+      summary: result.summary,
+      model: process.env.DREAM_MODEL_NAME,
+      archived: true,
+      summary_injected: summaryInjected,
+      memory_used: Boolean(memory),
+      conversation_used: Boolean(conversation)
+    });
+  } catch (error) {
+    app.log.error({ err: error }, "测试梦生成失败");
+    return reply.code(500).send({ success: false, error: String(error.message || error) });
+  } finally {
+    manualDreamRunning = false;
   }
 });
 
@@ -2416,6 +2490,13 @@ const html = `<!DOCTYPE html>
 
     <a class="archive-link" href="/admin/archive">打开 Wake Archive · ${escapeHtml(archiveStatus)}</a>
 
+    <div class="diary-box">
+      <h3>Dream Preview</h3>
+      <p>立即用正式的 Ombre 素材与梦境 Prompt 生成一次测试梦；跳过时间、空闲、概率和今晚状态检查。</p>
+      <button id="dreamTestButton" onclick="generateTestDream()">立即做一个测试梦</button>
+      <pre id="dreamTestResult" style="display:none;white-space:pre-wrap;line-height:1.7;margin-top:14px;"></pre>
+    </div>
+
     <!-- 预设方案 -->
     <div class="presets-box">
       <h3>预设方案</h3>
@@ -2643,6 +2724,33 @@ const html = `<!DOCTYPE html>
         }
       } catch (e) {
         alert("请求失败：" + e.message);
+      }
+    }
+
+    async function generateTestDream() {
+      if (!confirm("现在生成一个测试梦？它会调用一次 DREAM_MODEL_NAME，并写入加密 Archive。")) return;
+      const button = document.getElementById("dreamTestButton");
+      const output = document.getElementById("dreamTestResult");
+      button.disabled = true;
+      button.textContent = "正在做梦…";
+      output.style.display = "block";
+      output.textContent = "正在从 Ombre 取材并生成梦境，通常需要几十秒。";
+      try {
+        const resp = await fetch("/admin/dream-test", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Authorization": AUTH_HEADER },
+          body: "{}"
+        });
+        const result = await resp.json();
+        if (!resp.ok || !result.success) throw new Error(result.error || "生成失败");
+        output.textContent = result.dream + "\n\n概要：" + result.summary +
+          "\n模型：" + result.model +
+          "\n素材：" + (result.memory_used ? "Ombre " : "") + (result.conversation_used ? "最近对话" : "");
+      } catch (error) {
+        output.textContent = "测试梦生成失败：" + error.message;
+      } finally {
+        button.disabled = false;
+        button.textContent = "再做一个测试梦";
       }
     }
 

@@ -77,6 +77,31 @@ function dreamMemoryMaterial({ experiences = "", feelings = "", self = "" } = {}
   return sections.join("\n\n").slice(0, 10000);
 }
 
+async function readDreamMemory({ client, conversation = "", logger = console }) {
+  await client.initialize();
+  const query = dreamRecallQuery(conversation);
+  const requests = {
+    experiences: client.callReadTool("breath_advanced", {
+      max_results: 5,
+      max_tokens: 3500,
+      mode: "automatic"
+    }),
+    feelings: query
+      ? client.callReadTool("feel", { query, max_tokens: 1200 })
+      : Promise.resolve(""),
+    self: client.callReadTool("I", { read: true, limit: 4 })
+  };
+  const entries = Object.entries(requests);
+  const settled = await Promise.allSettled(entries.map(([, request]) => request));
+  const recalled = {};
+  settled.forEach((result, index) => {
+    const kind = entries[index][0];
+    if (result.status === "fulfilled") recalled[kind] = result.value;
+    else logger.warn?.(JSON.stringify({ event: "dream_memory_part_unavailable", kind, error: String(result.reason?.message || result.reason) }));
+  });
+  return dreamMemoryMaterial(recalled);
+}
+
 function parseDream(text) {
   const raw = String(text || "").trim();
   let value;
@@ -187,5 +212,5 @@ async function runDreamCycle(options) {
   }
 }
 
-module.exports = { DEFAULT_DREAM_STYLE_PROMPT, buildDreamMessages, conversationMaterial, currentSelfMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, parseDream, requestDream, runDreamCycle, stripCorePrinciples };
+module.exports = { DEFAULT_DREAM_STYLE_PROMPT, buildDreamMessages, conversationMaterial, currentSelfMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, parseDream, readDreamMemory, requestDream, runDreamCycle, stripCorePrinciples };
 

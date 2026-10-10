@@ -15,7 +15,7 @@ const { findSimilarRecentPush, getLatestSentPushTime, getRecentSentPushes } = re
 const { appendWakeArchive, archiveConfigured, buildWakeArchiveOutcome, readReadingHistory } = require("./wake_archive");
 const { runSoloCycle } = require("./solo_runtime");
 const { OmbreMcpClient } = require("./ombre_mcp_client");
-const { dreamMemoryMaterial, dreamRecallQuery, runDreamCycle } = require("./dream_runtime");
+const { readDreamMemory, runDreamCycle } = require("./dream_runtime");
 const {
   activityGate,
   classifyActivityFailure,
@@ -961,28 +961,7 @@ async function runDreamCheck() {
         token: process.env.OMBRE_MCP_TOKEN,
         timeoutMs: readPositiveTimeout("OMBRE_MCP_TIMEOUT_MS", 12_000)
       });
-      await client.initialize();
-      const query = dreamRecallQuery(conversation);
-      const requests = {
-        experiences: client.callReadTool("breath_advanced", {
-          max_results: 5,
-          max_tokens: 3500,
-          mode: "automatic"
-        }),
-        feelings: query
-          ? client.callReadTool("feel", { query, max_tokens: 1200 })
-          : Promise.resolve(""),
-        self: client.callReadTool("I", { read: true, limit: 4 })
-      };
-      const entries = Object.entries(requests);
-      const settled = await Promise.allSettled(entries.map(([, request]) => request));
-      const recalled = {};
-      settled.forEach((result, index) => {
-        const kind = entries[index][0];
-        if (result.status === "fulfilled") recalled[kind] = result.value;
-        else console.warn(JSON.stringify({ event: "dream_memory_part_unavailable", kind, error: String(result.reason?.message || result.reason) }));
-      });
-      return dreamMemoryMaterial(recalled);
+      return readDreamMemory({ client, conversation, logger: console });
     },
     archive: record => appendWakeArchive(record),
     recordSummary: async summary => {

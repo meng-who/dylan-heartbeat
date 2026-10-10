@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { buildDreamMessages, conversationMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, requestDream, runDreamCycle } = require("../dream_runtime");
+const { buildDreamMessages, conversationMaterial, dreamMemoryMaterial, dreamNight, dreamRecallQuery, readDreamMemory, requestDream, runDreamCycle } = require("../dream_runtime");
 
 const timeZone = "Asia/Shanghai";
 const now = new Date("2026-10-10T15:30:00.000Z");
@@ -163,5 +163,22 @@ test("recent conversation becomes a bounded recall query", () => {
   const query = dreamRecallQuery("用户：今天看见一座桥。\nAI：你说那让你想起小时候。");
   assert.equal(query, "今天看见一座桥。 你说那让你想起小时候。");
   assert.ok(query.length <= 300);
+});
+
+test("dream recall reads experiences, related feelings and self knowledge without extra generation", async () => {
+  const calls = [];
+  const client = {
+    initialize: async () => { calls.push(["initialize", {}]); },
+    callReadTool: async (name, args) => {
+      calls.push([name, args]);
+      if (name === "feel") return "想到桥时有一点安心。";
+      if (name === "I") return "=== 我的自我认知（1 条）===\n我会珍惜偶然的相遇。";
+      return "=== 核心准则 ===\n不要撒谎\n=== 浮现记忆 ===\n雨后的桥。";
+    }
+  };
+  const material = await readDreamMemory({ client, conversation: "用户：今天走过一座桥。" });
+  assert.deepEqual(calls.map(([name]) => name), ["initialize", "breath_advanced", "feel", "I"]);
+  assert.match(material, /雨后的桥|一点安心|珍惜偶然/);
+  assert.doesNotMatch(material, /不要撒谎/);
 });
 
