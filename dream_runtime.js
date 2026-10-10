@@ -134,21 +134,26 @@ function buildDreamMessages(memory, conversation, stylePrompt = "") {
 
 const DREAM_ENDPOINTS = {
   bigmodel: "https://open.bigmodel.cn/api/paas/v4/chat/completions",
+  gemini: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
   siliconflow: "https://api.siliconflow.cn/v1/chat/completions"
 };
 
 function resolveDreamModelConfig(env = process.env) {
   const model = String(env.DREAM_MODEL_NAME || "").trim();
   const requestedProvider = String(env.DREAM_PROVIDER || "").trim().toLowerCase();
-  const provider = requestedProvider || (env.SILICONFLOW_API_KEY && model.includes("/") ? "siliconflow" : "bigmodel");
+  const provider = requestedProvider || (env.GEMINI_API_KEY && model.startsWith("gemini-")
+    ? "gemini"
+    : env.SILICONFLOW_API_KEY && model.includes("/") ? "siliconflow" : "bigmodel");
   if (!DREAM_ENDPOINTS[provider]) return { provider, model, apiKey: "", endpoint: "" };
-  const apiKey = provider === "siliconflow"
-    ? String(env.SILICONFLOW_API_KEY || "").trim()
-    : String(env.BIGMODEL_API_KEY || "").trim();
+  const apiKey = provider === "gemini"
+    ? String(env.GEMINI_API_KEY || "").trim()
+    : provider === "siliconflow" ? String(env.SILICONFLOW_API_KEY || "").trim()
+      : String(env.BIGMODEL_API_KEY || "").trim();
   return { provider, model, apiKey, endpoint: DREAM_ENDPOINTS[provider] };
 }
 
 function isTransientModelBusy(status, body, provider = "bigmodel") {
+  if (provider === "gemini" && [429, 503].includes(Number(status))) return true;
   if (Number(status) !== 429) return false;
   if (provider === "siliconflow") return true;
   try {
@@ -177,10 +182,11 @@ async function requestDream({
         model,
         messages,
         stream: false,
-        max_tokens: 900,
+        max_tokens: provider === "gemini" ? 2400 : 900,
         temperature: 0.75
       };
       if (provider === "bigmodel") body.thinking = { type: "disabled" };
+      if (provider === "gemini") body.reasoning_effort = "minimal";
       response = await fetchImpl(endpoint, {
         method: "POST",
         signal: AbortSignal.timeout(timeoutMs),
