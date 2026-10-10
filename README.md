@@ -355,11 +355,11 @@ WAKE_DAY_END_HOUR=24
 
 这些 Ombre 调用只是记忆库读取与向量检索，不调用模型。整场梦通常只向梦境专用模型发送一次生成请求，不调用对话主模型，也不会发送手机推送。梦的完整正文写进加密 Archive；下一次聊天只收到带“这是梦，不是真实发生的事”标记的短概要。遇到免费模型拥堵时会有限重试；一个正式夜晚仍只执行这一轮梦境任务。
 
-梦境不额外分成“好梦”和“噩梦”，也不会安排独立的噩梦概率。Prompt 允许短暂、轻微的不安、失落或陌生感，但会避免追杀、虐待、羞辱、持续恐惧和受困无解等噩梦式升级。
+梦境不额外分成“好梦”和“噩梦”，也不会安排独立的噩梦概率。Prompt 允许短暂、轻微的不安、失落或陌生感，但会避免追杀、虐待、羞辱、持续恐惧和受困无解等噩梦式升级。 近期对话只作为情绪、意象和关系张力的素材；Prompt 禁止逐字复述，生成后还会检查连续原句并在命中时重写一次。概要需覆盖梦的开端、关键变化和结尾，不再直接截取正文开头或在半句中截断。
 
 需要立刻检查生成质量时，可以打开 `/admin`，在 **Dream Preview** 中点击“立即做一个测试梦”。这个入口使用和正式梦境完全相同的 Ombre 取材、Prompt、模型与归档流程，只跳过时间窗口、空闲时长、概率和当晚判定。生成的全文会直接显示在管理页并写入加密 Archive，短概要也会作为梦境事件进入下一次聊天上下文。
 
-推荐使用 Google Gemini API 免费层的 `gemini-3.8-flash`。Render 的境外运行区域可直接访问，无需配置代理。在 Render 中配置：
+推荐使用 Google Gemini API 免费层的 `gemini-2.5-flash`。Render 的境外运行区域可直接访问，无需配置代理。在 Render 中配置：
 
 ```env
 DREAM_ENABLED=false
@@ -368,7 +368,7 @@ DREAM_IDLE_MINUTES=120
 DREAM_START_HOUR=22
 DREAM_END_HOUR=8
 DREAM_PROVIDER=gemini
-DREAM_MODEL_NAME=gemini-3.8-flash
+DREAM_MODEL_NAME=gemini-2.5-flash
 GEMINI_API_KEY=你的Google AI Studio API密钥
 MAX_INJECTED_DREAM_EVENTS=2
 OMBRE_MCP_URL=https://你的-ombre服务.onrender.com/mcp

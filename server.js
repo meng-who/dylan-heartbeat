@@ -1184,7 +1184,8 @@ app.post("/admin/dream-test", { preHandler: basicAuth }, async (req, reply) => {
 
     const result = await requestDream({
       ...modelConfig,
-      messages: buildDreamMessages(memory, conversation, process.env.DREAM_STYLE_PROMPT)
+      messages: buildDreamMessages(memory, conversation, process.env.DREAM_STYLE_PROMPT),
+      forbiddenVerbatimText: conversation
     });
     const now = new Date();
     const archived = appendWakeArchive({
