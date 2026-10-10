@@ -353,13 +353,13 @@ WAKE_DAY_END_HOUR=24
 
 抽中后，程序从 Ombre Brain 并行读取三类素材：`breath_advanced` 自然浮现的经历碎片、与最近真实对话相关的 `feel`、以及只读的 `I` 自我认识。核心准则 `pinned/permanent` 会在本地剔除，因为它们是行为坐标而不是经历。经历占主要素材预算，感受和自我认识只提供情绪底色与第一人称视角；任一路读取失败都不影响其余素材。最近真实对话最多取 30 条、总计 7000 字符；不会读取 Solo、Activity 或读书 Archive。
 
-这些 Ombre 调用只是记忆库读取与向量检索，不调用模型。整场梦仅向智谱 BigModel 发送一次生成请求，不调用对话主模型，也不会发送手机推送。梦的完整正文写进加密 Archive；下一次聊天只收到带“这是梦，不是真实发生的事”标记的短概要。模型失败时，那个夜晚不反复重试。
+这些 Ombre 调用只是记忆库读取与向量检索，不调用模型。整场梦通常只向梦境专用模型发送一次生成请求，不调用对话主模型，也不会发送手机推送。梦的完整正文写进加密 Archive；下一次聊天只收到带“这是梦，不是真实发生的事”标记的短概要。遇到免费模型拥堵时会有限重试；一个正式夜晚仍只执行这一轮梦境任务。
 
 梦境不额外分成“好梦”和“噩梦”，也不会安排独立的噩梦概率。Prompt 允许短暂、轻微的不安、失落或陌生感，但会避免追杀、虐待、羞辱、持续恐惧和受困无解等噩梦式升级。
 
 需要立刻检查生成质量时，可以打开 `/admin`，在 **Dream Preview** 中点击“立即做一个测试梦”。这个入口使用和正式梦境完全相同的 Ombre 取材、Prompt、模型与归档流程，只跳过时间窗口、空闲时长、概率和当晚判定。生成的全文会直接显示在管理页并写入加密 Archive，短概要也会作为梦境事件进入下一次聊天上下文。
 
-在 Render 中配置以下变量。`BIGMODEL_API_KEY` 从智谱 BigModel 开放平台获取；`glm-4.7-flash` 由智谱官方标为免费调用：
+推荐使用硅基流动的免费 `THUDM/GLM-4-9B-0414`。在 Render 中配置：
 
 ```env
 DREAM_ENABLED=false
@@ -367,15 +367,16 @@ DREAM_PROBABILITY=0.35
 DREAM_IDLE_MINUTES=120
 DREAM_START_HOUR=22
 DREAM_END_HOUR=8
-DREAM_MODEL_NAME=glm-4.7-flash
-BIGMODEL_API_KEY=你的智谱 BigModel API 密钥
+DREAM_PROVIDER=siliconflow
+DREAM_MODEL_NAME=THUDM/GLM-4-9B-0414
+SILICONFLOW_API_KEY=你的硅基流动API密钥
 MAX_INJECTED_DREAM_EVENTS=2
 OMBRE_MCP_URL=https://你的-ombre服务.onrender.com/mcp
 OMBRE_MCP_TOKEN=你的Ombre静态Token
 WAKE_ARCHIVE_KEY=现有的32字节Base64URL密钥
 ```
 
-确认密钥和免费模型可用后，把 `DREAM_ENABLED` 改为 `true`。密钥只存 Render Secret，不要提交 GitHub。`DREAM_PROBABILITY=0` 表示永远不抽中，`1` 表示每个符合条件的夜晚都尝试；这不是生成成功率，也不会保证某一晚一定有梦。`DREAM_START_HOUR` 和 `DREAM_END_HOUR` 按 `TIME_ZONE` 控制可做梦时段，可以跨午夜；小时通常取 0 至 23，`24` 会按 `0` 处理。程序内置了增强版梦境 Prompt，不需要配置 `DREAM_STYLE_PROMPT`；只有想临时修改梦的口吻、氛围或叙事习惯时才添加它。JSON 输出格式、素材边界和梦境标记始终由程序固定保护。`MAX_INJECTED_DREAM_EVENTS=2` 表示后续聊天最多注入最近两次梦的短概要，完整梦境始终只保存在加密 Archive 中。
+确认密钥和免费模型可用后，把 `DREAM_ENABLED` 改为 `true`。如果以后切回智谱，把 `DREAM_PROVIDER` 改成 `bigmodel`，填写 `BIGMODEL_API_KEY`，并换成智谱模型名；旧部署仍兼容原来的智谱变量。密钥只存 Render Secret，不要提交 GitHub。`DREAM_PROBABILITY=0` 表示永远不抽中，`1` 表示每个符合条件的夜晚都尝试；这不是生成成功率，也不会保证某一晚一定有梦。`DREAM_START_HOUR` 和 `DREAM_END_HOUR` 按 `TIME_ZONE` 控制可做梦时段，可以跨午夜；小时通常取 0 至 23，`24` 会按 `0` 处理。程序内置了增强版梦境 Prompt，不需要配置 `DREAM_STYLE_PROMPT`；只有想临时修改梦的口吻、氛围或叙事习惯时才添加它。JSON 输出格式、素材边界和梦境标记始终由程序固定保护。`MAX_INJECTED_DREAM_EVENTS=2` 表示后续聊天最多注入最近两次梦的短概要，完整梦境始终只保存在加密 Archive 中。
 
 ## 🌙 Solo AI（独处事件）
 
@@ -406,7 +407,7 @@ Activity 可从 Spotify、Ombre、AISay 潜水/读书、小游戏、Notion 提�
 
 ```env
 AUTONOMY_ENABLED=false
-AUTONOMY_ACTIONS=spotify,ombre,forum,games,question_box,galatea,nostos
+AUTONOMY_ACTIONS=spotify,ombre,forum,games,question_box,galatea
 AUTONOMY_TEST_FORCE_GAME=
 AUTONOMY_MODEL_NAME=自主活动专用主模型（可选）
 AUTONOMY_BACKUP_MODEL_NAME=自主活动专用备用模型（可选）
@@ -439,7 +440,7 @@ ADMIN_SESSION_DAYS=180
 ```
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
-- `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`books`、`games`、`question_box`、`galatea`、`nostos` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。`nostos` 复用 `GALATEA_MCP_URL` 和 `GALATEA_MCP_TOKEN`，先只读查看雾潮群岛的行动与身体，再由一次模型调用规划最多六步；开工、睡觉或旅行后等待现实时间推进，不会强行继续。`forum` 只会潜水读取已加入的公开房间并把感受或回复草稿存入私人 Archive，绝不会自动加群或发言；为兼容旧部署，启用 `forum` 时也会同时提供只读书店活动。若只想读书、不想潜水，可单独填写 `books`。
+- `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`books`、`games`、`question_box`、`galatea` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。`forum` 只会潜水读取已加入的公开房间并把感受或回复草稿存入私人 Archive，绝不会自动加群或发言；为兼容旧部署，启用 `forum` 时也会同时提供只读书店活动。若只想读书、不想潜水，可单独填写 `books`。
 - Galatea Activity 会在模型请求前读取当前身份、最新帖子、帖子完整正文与回复，以及自己的近期公开活动。模型只调用一次，可一次规划最多 3 个写动作，其中最多 1 个新主题；程序随后机械完成每项 `create_thread` / `create_reply` 的两段式确认，不再请求模型。回复只能指向本轮完整读取过的帖子；不会调用删除、点赞、关注、资料修改、游戏、漂流瓶或会消耗通知的工具。每一步参数与最终回执都会加密写入 Archive。
 - Books Activity 会从加密 Archive 自动整理全部可识别的成功阅读记录，以 `book_id + chapter_no` 建立阅读履历。它优先续读最近读过且已有新章的书，并避开重复章节；模型只收到最多 10 本书的压缩章节范围和本轮正文，不注入旧读后感，也不增加模型请求次数。
 - Question Box Activity 会在模型请求前只读 Notion：有 Melissa 未回答的问题时，本轮只允许回答其中一题；没有待答问题时，可提一个新问题、给最近的已完成问答补后记，或不行动。Notion 可发生多次确定性读写，但整轮仍只调用一次模型。写入前会重新读取页面，避免重复回答。
@@ -457,7 +458,6 @@ ADMIN_SESSION_DAYS=180
 - Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
 - `FORUM_MCP_URL`：填写 AISay 完整的自动登录 MCP 地址，供论坛潜水与书店阅读共同使用。地址已经包含 `?token=...` 时，`FORUM_MCP_TOKEN` 留空即可；它属于密钥，只放 Render Secret，不要提交到 GitHub。
 - `GALATEA_MCP_TOKEN`：只填写原始 token，客户端会自动生成 `Authorization: Bearer <token>`；不要把 `Bearer ` 前缀重复写入变量，也不要提交到 GitHub。
-- `/admin/activity/nostos-test`：使用现有 Galatea 连接只读查看雾潮群岛的 `actions` 页面和三项工具契约；加上 `?view=help` 可查看玩法说明。不会开局或提交行动。
 
 Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CHECK_INTERVAL_MINUTES` 或普通唤醒阈值影响。它与 Wake/Solo 恰好撞车时只会跳过这一次条件检查，稍后按自己的频率重试，避免同时调用两个模型。
 
