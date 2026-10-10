@@ -55,7 +55,7 @@ function buildDreamMessages(memory, conversation) {
 }
 
 async function requestDream({ apiKey, model, messages, fetchImpl = fetch, timeoutMs = 45000 }) {
-  const response = await fetchImpl("https://api.siliconflow.cn/v1/chat/completions", {
+  const response = await fetchImpl("https://open.bigmodel.cn/api/paas/v4/chat/completions", {
     method: "POST",
     signal: AbortSignal.timeout(timeoutMs),
     headers: {
@@ -68,7 +68,7 @@ async function requestDream({ apiKey, model, messages, fetchImpl = fetch, timeou
       stream: false,
       max_tokens: 900,
       temperature: 0.75,
-      ...(model.startsWith("Qwen/Qwen3") ? { enable_thinking: false } : {})
+      thinking: { type: "disabled" }
     })
   });
   const body = await response.text();
@@ -90,7 +90,7 @@ async function runDreamCycle(options) {
   if (!Number.isFinite(userTime) || now.getTime() - userTime < idleMs) {
     return { ran: false, reason: "not_idle" };
   }
-  if (!env.SILICONFLOW_API_KEY || !env.DREAM_MODEL_NAME || !env.WAKE_ARCHIVE_KEY) {
+  if (!env.BIGMODEL_API_KEY || !env.DREAM_MODEL_NAME || !env.WAKE_ARCHIVE_KEY) {
     return { ran: false, reason: "not_configured" };
   }
   if (loadState()?.night === night) return { ran: false, reason: "already_decided" };
@@ -111,7 +111,7 @@ async function runDreamCycle(options) {
   if (!memory && !conversation) return { ran: false, reason: "no_material", night };
   try {
     const result = await requestDream({
-      apiKey: env.SILICONFLOW_API_KEY,
+      apiKey: env.BIGMODEL_API_KEY,
       model: env.DREAM_MODEL_NAME,
       messages: buildDreamMessages(memory, conversation),
       fetchImpl

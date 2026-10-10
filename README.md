@@ -351,16 +351,16 @@ WAKE_DAY_END_HOUR=24
 
 梦境沿用 Heartbeat 的夜间检查，不需要另设 cron。北京时间 22:00 至次日 08:00、用户离开达到 `DREAM_IDLE_MINUTES` 后，每个夜晚只做一次概率判定。默认概率 `0.35`：即每晚有 35% 的机会尝试生成，没抽中就安静结束；频繁检查不会累积概率。重启后判定仍保存在 `DATA_DIR/dream_state.json`。默认关闭，所以部署代码不会让今晚自动做梦。
 
-抽中后，程序只读 Ombre Brain 的 `breath_advanced` 记忆桶，并选取近期真实对话；不会读取 Solo、Activity 或读书 Archive 作为素材。仅向硅基流动发送一次生成请求，不调用 Dylan 的主模型，也不会发送手机推送。梦的完整正文写进加密 Archive；下一次聊天只收到带“这是梦，不是真实发生的事”标记的短概要。模型或记忆服务失败时，那个夜晚不反复重试。
+抽中后，程序只读 Ombre Brain 的 `breath_advanced` 记忆桶，并选取近期真实对话；不会读取 Solo、Activity 或读书 Archive 作为素材。仅向智谱 BigModel 发送一次生成请求，不调用 Dylan 的主模型，也不会发送手机推送。梦的完整正文写进加密 Archive；下一次聊天只收到带“这是梦，不是真实发生的事”标记的短概要。模型或记忆服务失败时，那个夜晚不反复重试。
 
-在 Render 中配置并确认所选模型在你的硅基流动账号里确实标为免费：
+在 Render 中配置以下变量。`BIGMODEL_API_KEY` 从智谱 BigModel 开放平台获取；`glm-4.7-flash` 由智谱官方标为免费调用：
 
 ```env
 DREAM_ENABLED=false
 DREAM_PROBABILITY=0.35
 DREAM_IDLE_MINUTES=120
-DREAM_MODEL_NAME=THUDM/GLM-4-9B-0414
-SILICONFLOW_API_KEY=你的硅基流动API密钥
+DREAM_MODEL_NAME=glm-4.7-flash
+BIGMODEL_API_KEY=你的智谱 BigModel API 密钥
 MAX_INJECTED_DREAM_EVENTS=2
 OMBRE_MCP_URL=https://你的-ombre服务.onrender.com/mcp
 OMBRE_MCP_TOKEN=你的Ombre静态Token

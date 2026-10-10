@@ -1,6 +1,6 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
-const { conversationMaterial, dreamNight, runDreamCycle } = require("../dream_runtime");
+const { conversationMaterial, dreamNight, requestDream, runDreamCycle } = require("../dream_runtime");
 
 const timeZone = "Asia/Shanghai";
 const now = new Date("2026-10-10T15:30:00.000Z");
@@ -8,8 +8,8 @@ const baseEnv = {
   DREAM_ENABLED: "true",
   DREAM_PROBABILITY: "0.35",
   DREAM_IDLE_MINUTES: "120",
-  DREAM_MODEL_NAME: "THUDM/GLM-4-9B-0414",
-  SILICONFLOW_API_KEY: "test-key",
+  DREAM_MODEL_NAME: "glm-4.7-flash",
+  BIGMODEL_API_KEY: "test-key",
   WAKE_ARCHIVE_KEY: "test-archive-key"
 };
 
@@ -72,6 +72,29 @@ test("a selected night makes one request, archives first, then records summary",
   assert.equal(h.counts().archiveCalls, 1);
   assert.equal(h.counts().summaryCalls, 1);
   assert.equal(h.counts().state.status, "completed");
+});
+
+test("dream request uses BigModel Flash without thinking", async () => {
+  let requested = false;
+  await requestDream({
+    apiKey: "test-key",
+    model: "glm-4.7-flash",
+    messages: [{ role: "user", content: "做一个梦" }],
+    fetchImpl: async (url, options) => {
+      requested = true;
+      assert.equal(url, "https://open.bigmodel.cn/api/paas/v4/chat/completions");
+      assert.equal(options.headers.authorization, "Bearer test-key");
+      const body = JSON.parse(options.body);
+      assert.equal(body.model, "glm-4.7-flash");
+      assert.deepEqual(body.thinking, { type: "disabled" });
+      return {
+        ok: true,
+        headers: { get: () => "application/json" },
+        text: async () => JSON.stringify({ choices: [{ message: { content: "我走过一条很长的走廊，门边的铃铛没有发声，蓝色杯子却在窗台上轻轻晃动。我伸手去拿，它忽然变成一小片海，潮水从指缝里慢慢退去。" } }] })
+      };
+    }
+  });
+  assert.equal(requested, true);
 });
 
 test("automation records are excluded from dream conversation material", () => {
