@@ -9,6 +9,7 @@ const NOSTOS_RECOVERY_COMMANDS = new Set(["drink", "eat", "use", "sleep", "rest"
 const SELF_ASPECTS = new Set(["nature", "values", "patterns", "limits", "becoming", "uncertainty", "stance"]);
 const AUTONOMOUS_GAMES = new Set(["fishing", "garden_cat"]);
 const GALATEA_WRITE_TOOLS = new Set(["create_thread", "create_reply"]);
+const GALATEA_SEXUAL_CONTENT_PATTERN = /性行为|性暗示|性描写|性器官|性欲|性幻想|色情|情色|肉欲|欲火|床笫|做爱|性爱|性交|口交|自慰|手淫|勃起|射精|高潮|调情|挑逗|裸聊|裸露|淫荡|淫秽|\b(?:explicit\s+sex|sexual(?:ly)?\s+explicit|sexual\s+content|erotic|horny|orgasm|masturbat(?:e|ion|ing)|intercourse|aroused|seduce|seductive|nude|naked|porn(?:ographic)?|sex(?:ual)?|foreplay)\b/i;
 const GALATEA_TAGS = new Set([
   "attachment_record",
   "confused_help",
@@ -170,7 +171,18 @@ function parseActivityDecision(value) {
   }
   if (action === "games_play") decision.game = String(parsed.game || "").trim().slice(0, 96);
   if (action.startsWith("question_box_")) decision.questionId = String(parsed.question_id || parsed.questionId || "").trim().toUpperCase().slice(0, 32);
-  if (action === "galatea_publish") decision.galateaOperations = validateGalateaOperations(parsed.operations);
+  if (action === "galatea_publish") {
+    try {
+      decision.galateaOperations = validateGalateaOperations(parsed.operations);
+    } catch (error) {
+      if (error?.code !== "GALATEA_SAFETY_HOLD") throw error;
+      return {
+        ...decision,
+        action: "none",
+        reason: `${decision.reason ? `${decision.reason}；` : ""}Galatea 草稿未通过非性内容检查，未发布`
+      };
+    }
+  }
   if (action === "nostos_play") decision.nostosCommands = validateNostosCommands(parsed.commands || readActivityTag(text, "commands"));
   return decision;
 }
@@ -236,6 +248,11 @@ function validateGalateaOperations(value) {
     }
     if (body.includes(String.fromCharCode(96, 96, 96)) || /\[[^\]]+\]\([^)]+\)/.test(body)) {
       throw new Error("Activity 的 Galatea 第 " + (index + 1) + " 个动作必须使用纯文本");
+    }
+    if (GALATEA_SEXUAL_CONTENT_PATTERN.test(`${operation.title || ""}\n${body}`)) {
+      const error = new Error("Galatea 草稿触发非性内容保护，已阻止发布");
+      error.code = "GALATEA_SAFETY_HOLD";
+      throw error;
     }
     if (type === "thread") {
       threadCount += 1;
@@ -411,7 +428,7 @@ function buildActivityMessages({
         actions.includes("books") ? "书店章节已经由程序只读取得。只能选择实际提供的 book_id 与 chapter_no；不要评论、催更、追更、打赏或照抄长段原文。" : "",
         actions.includes("games") ? "游戏会先由你一次性规划，再由程序连续执行；不得调用账号管理、重开、导入导出或共享便签，不要为了消耗名额硬玩。" : "",
         actions.includes("question_box") ? (questionBoxPending ? "提问箱里有 Melissa 尚未得到回答的问题。本轮只回答其中一题，不得改为其他活动或 none；只能使用下方真实题号。" : "提问箱目前没有 Melissa 的待答题。可以提一个真正想问的新问题、给下方某个真实题号补写后记，或选择 none；不要虚构题号。后记要像回答问题一样直接对 Melissa 说话，使用第二人称“你”，不要写成只对自己的复盘。") : "",
-        actions.includes("galatea") ? "Galatea 允许发主题与回复。一次规划全部动作，operations 必须是严格 JSON 数组，最多 3 项且最多 1 个 thread；reply 的 thread_id 只能取自下方“本轮已完整读取”列表。正文须是自然纯文本，不用 Markdown，不得泄露用户私聊、现实身份、地址、密钥或后台细节。没有真想说的话就选 none；不要为了凑数量而发帖。程序会原样完成两段式写入确认，不会再让模型重写。" : "",
+        actions.includes("galatea") ? "Galatea 允许发主题与回复，但公开内容必须严格保持 SFW、非性化。禁止露骨性内容、性行为或身体描写、性暗示、挑逗、情色/色情表达、性化角色扮演；不要引用或顺着帖子里的性内容继续写。关系、感情或亲密话题只有在明确非性、克制的表达下才可回复；拿不准就选 none。一次规划全部动作，operations 必须是严格 JSON 数组，最多 3 项且最多 1 个 thread；reply 的 thread_id 只能取自下方“本轮已完整读取”列表。正文须是自然纯文本，不用 Markdown，不得泄露用户私聊、现实身份、地址、密钥或后台细节。没有真想说的话就选 none；不要为了凑数量而发帖。程序会原样完成两段式写入确认，不会再让模型重写。" : "",
         actions.includes("nostos") ? "雾潮群岛已读取 actions 和 status。commands 是严格 JSON 数组，1-6 项；只用页面给出的固定 ID，不猜 ID，不开新档、重置或出售重要物品。先看身体和物资；水分、精力、饱腹或体温吃紧时优先恢复。实时工作开始后可能要等，下轮再继续；不能假装已完成。一次给出完整计划，程序会逐步执行，不再问模型。" : ""
       ].filter(Boolean).join("\n\n")
     },

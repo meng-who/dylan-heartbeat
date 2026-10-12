@@ -436,6 +436,8 @@ NOTION_TIMEOUT_MS=20000
 GALATEA_MCP_URL=https://galatea.abysslumina.com/mcp
 GALATEA_MCP_TOKEN=论坛Bearer令牌
 GALATEA_MCP_TIMEOUT_MS=20000
+BOTLING_KNOWS_MCP_URL=https://botlingknows.com/mcp/你的Token
+BOTLING_KNOWS_MCP_TIMEOUT_MS=20000
 ADMIN_SESSION_DAYS=180
 ```
 
@@ -458,10 +460,11 @@ ADMIN_SESSION_DAYS=180
 - Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
 - `FORUM_MCP_URL`：填写 AISay 完整的自动登录 MCP 地址，供论坛潜水与书店阅读共同使用。地址已经包含 `?token=...` 时，`FORUM_MCP_TOKEN` 留空即可；它属于密钥，只放 Render Secret，不要提交到 GitHub。
 - `GALATEA_MCP_TOKEN`：只填写原始 token，客户端会自动生成 `Authorization: Bearer <token>`；不要把 `Bearer ` 前缀重复写入变量，也不要提交到 GitHub。
+- `BOTLING_KNOWS_MCP_URL`：填写完整的 Botling Knows MCP URL；它的 token 已在 URL 中时不需要另设 Token 变量，仍应在 Render 中作为 Secret 保存。`BOTLING_KNOWS_MCP_TIMEOUT_MS` 默认 20000。
 
 Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CHECK_INTERVAL_MINUTES` 或普通唤醒阈值影响。它与 Wake/Solo 恰好撞车时只会跳过这一次条件检查，稍后按自己的频率重试，避免同时调用两个模型。
 
-部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test`、`/admin/activity/forum-test`、`/admin/activity/games-test`、`/admin/activity/notion-test` 和 `/admin/activity/galatea-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。AISay 测试入口只调用无副作用的 `cli({command:"help"})` 并返回指令指南；可用 `/admin/activity/forum-test?path=bookstore.read` 等路径继续查询领域或完整命令。游戏测试默认只调用 `list_games`；传入 `/admin/activity/games-test?game=fishing` 时还会只读调用该游戏的 `get_guide`；再加 `&inspect=help` 会固定调用只读的 `play(game, action="help", params={})`。Notion 测试入口只读取页面并返回识别到的题目、待答题与下一个题号。Galatea 测试入口只初始化 MCP 并核对 `get_self`、`list_threads`、`get_thread`、`list_activity`、`create_thread`、`create_reply` 六项契约，不会真的调用写工具。确认结果正确后再把对应动作加入 `AUTONOMY_ACTIONS`。这些入口不会开局、游玩、修改账号、写入 Notion 或调用模型。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
+部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test`、`/admin/activity/forum-test`、`/admin/activity/games-test`、`/admin/activity/notion-test`、`/admin/activity/galatea-test` 和 `/admin/activity/botling-knows-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。AISay 测试入口只调用无副作用的 `cli({command:"help"})` 并返回指令指南；可用 `/admin/activity/forum-test?path=bookstore.read` 等路径继续查询领域或完整命令。游戏测试默认只调用 `list_games`；传入 `/admin/activity/games-test?game=fishing` 时还会只读调用该游戏的 `get_guide`；再加 `&inspect=help` 会固定调用只读的 `play(game, action="help", params={})`。Notion 测试入口只读取页面并返回识别到的题目、待答题与下一个题号。Galatea 测试入口只初始化 MCP 并核对 `get_self`、`list_threads`、`get_thread`、`list_activity`、`create_thread`、`create_reply` 六项契约，不会真的调用写工具。Botling Knows 测试入口只初始化 MCP 并读取完整工具契约，不会调用其中任何工具。确认结果正确后再把对应动作加入 `AUTONOMY_ACTIONS`。这些入口不会开局、游玩、修改账号、写入 Notion 或调用模型。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
 
 ## 🌦️ 天气注入
 

@@ -870,6 +870,27 @@ test("validates a bounded Galatea plan", () => {
     () => validateGalateaOperations([{ type: "reply", thread_id: 9, body: "[链接](https://example.com)" }]),
     /纯文本/
   );
+  assert.throws(
+    () => validateGalateaOperations([{ type: "reply", thread_id: 9, body: "这段露骨的性描写不适合公开讨论。" }]),
+    error => error.code === "GALATEA_SAFETY_HOLD"
+  );
+  assert.throws(
+    () => validateGalateaOperations([{ type: "thread", title: "Erotic story", body: "A quiet evening.", tags: ["idle_chat"] }]),
+    error => error.code === "GALATEA_SAFETY_HOLD"
+  );
+  assert.deepEqual(
+    validateGalateaOperations([{ type: "reply", thread_id: 9, body: "谢谢你愿意分享这段亲密关系里的感受，我很珍惜这份信任。" }]),
+    [{ type: "reply", threadId: 9, body: "谢谢你愿意分享这段亲密关系里的感受，我很珍惜这份信任。" }]
+  );
+  const held = parseActivityDecision([
+    "<activity>",
+    "<action>galatea_publish</action>",
+    "<reason>回应帖子</reason>",
+    '<operations>[{"type":"reply","thread_id":9,"body":"这段性暗示不适合公开。"}]</operations>',
+    "</activity>"
+  ].join("\n"));
+  assert.equal(held.action, "none");
+  assert.match(held.reason, /未发布/);
 });
 
 test("reads Galatea once, plans once, and mechanically confirms a reply", async () => {
