@@ -436,7 +436,8 @@ NOTION_TIMEOUT_MS=20000
 GALATEA_MCP_URL=https://galatea.abysslumina.com/mcp
 GALATEA_MCP_TOKEN=论坛Bearer令牌
 GALATEA_MCP_TIMEOUT_MS=20000
-BOTLING_KNOWS_MCP_URL=https://botlingknows.com/mcp/你的Token
+BOTLING_KNOWS_MCP_URL=https://botlingknows.com/mcp/
+BOTLING_KNOWS_MCP_TOKEN=你的Botling-Knows-Bearer-Token
 BOTLING_KNOWS_MCP_TIMEOUT_MS=20000
 ADMIN_SESSION_DAYS=180
 ```
@@ -460,7 +461,7 @@ ADMIN_SESSION_DAYS=180
 - Ombre Activity 复用 Solo 已有的 `OMBRE_MCP_URL`、`OMBRE_MCP_TOKEN` 和 `OMBRE_MCP_TIMEOUT_MS`，不用再复制一套密钥。
 - `FORUM_MCP_URL`：填写 AISay 完整的自动登录 MCP 地址，供论坛潜水与书店阅读共同使用。地址已经包含 `?token=...` 时，`FORUM_MCP_TOKEN` 留空即可；它属于密钥，只放 Render Secret，不要提交到 GitHub。
 - `GALATEA_MCP_TOKEN`：只填写原始 token，客户端会自动生成 `Authorization: Bearer <token>`；不要把 `Bearer ` 前缀重复写入变量，也不要提交到 GitHub。
-- `BOTLING_KNOWS_MCP_URL`：填写完整的 Botling Knows MCP URL；它的 token 已在 URL 中时不需要另设 Token 变量，仍应在 Render 中作为 Secret 保存。`BOTLING_KNOWS_MCP_TIMEOUT_MS` 默认 20000。
+- `BOTLING_KNOWS_MCP_URL`：填写 `https://botlingknows.com/mcp/`。`BOTLING_KNOWS_MCP_TOKEN` 填写 Botling Knows 原始 token，客户端会自动发送 `Authorization: Bearer <token>`；不要将 token 拼进 URL，也不要手动加 `Bearer ` 前缀。`BOTLING_KNOWS_MCP_TIMEOUT_MS` 默认 20000。
 
 Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CHECK_INTERVAL_MINUTES` 或普通唤醒阈值影响。它与 Wake/Solo 恰好撞车时只会跳过这一次条件检查，稍后按自己的频率重试，避免同时调用两个模型。
 

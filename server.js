@@ -1890,6 +1890,7 @@ app.get("/admin/activity/botling-knows-test", { preHandler: basicAuth }, async (
     }
     const client = new RemoteMcpClient({
       url: process.env.BOTLING_KNOWS_MCP_URL,
+      token: process.env.BOTLING_KNOWS_MCP_TOKEN,
       timeoutMs: Number(process.env.BOTLING_KNOWS_MCP_TIMEOUT_MS) || 20_000,
       clientName: "dylan-botling-knows-activity-test"
     });
