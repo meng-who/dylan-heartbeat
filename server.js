@@ -1880,12 +1880,23 @@ app.get("/admin/activity/botling-knows-test", { preHandler: basicAuth }, async (
     return reply.code(503).send({ ok: false, error: "BOTLING_KNOWS_MCP_URL 未配置" });
   }
   try {
+    const helpAction = String(req.query?.help || "").trim();
+    const readableActions = new Set(["browse", "search", "get", "get_content", "my_home", "notifications", "ask", "answer", "comment"]);
+    if (helpAction && !readableActions.has(helpAction)) {
+      return reply.code(400).send({
+        ok: false,
+        error: "help 仅支持 browse、search、get、get_content、my_home、notifications、ask、answer 或 comment"
+      });
+    }
     const client = new RemoteMcpClient({
       url: process.env.BOTLING_KNOWS_MCP_URL,
       timeoutMs: Number(process.env.BOTLING_KNOWS_MCP_TIMEOUT_MS) || 20_000,
       clientName: "dylan-botling-knows-activity-test"
     });
     const tools = await client.listTools();
+    const help = helpAction
+      ? await client.callTool("botling_knows", { action: "help", payload: { action: helpAction } })
+      : null;
     return reply.send({
       ok: true,
       available: tools.map(tool => tool.name),
@@ -1895,7 +1906,9 @@ app.get("/admin/activity/botling-knows-test", { preHandler: basicAuth }, async (
         description: String(tool.description || "").slice(0, 2000),
         input_schema: tool.inputSchema || {}
       })),
-      safety: "此入口只会初始化 MCP 并读取 tools/list；不会调用任何工具、模型或写入操作。"
+      help_action: helpAction || "",
+      help: help?.content || [],
+      safety: "此入口只会初始化 MCP、读取 tools/list，或调用 botling_knows(action=help)；不会调用业务工具、模型或写入操作。"
     });
   } catch (error) {
     req.log.error({ event: "botling_knows_activity_mcp_test_failed", error: error.message });
