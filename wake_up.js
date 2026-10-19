@@ -1094,6 +1094,7 @@ async function runActivityCheck() {
   if (enabledActions.includes("games")) required.push("GAMES_MCP_URL");
   if (enabledActions.includes("question_box")) required.push("NOTION_TOKEN", "NOTION_QUESTION_BOX_PAGE_ID");
   if (enabledActions.includes("galatea") || enabledActions.includes("nostos")) required.push("GALATEA_MCP_URL", "GALATEA_MCP_TOKEN");
+  if (enabledActions.includes("botling")) required.push("BOTLING_KNOWS_MCP_URL", "BOTLING_KNOWS_MCP_TOKEN");
   if (!enabledActions.length) {
     console.warn(JSON.stringify({ event: "activity_config_missing", variables: ["AUTONOMY_ACTIONS"] }));
     return { ran: false, reason: "not_configured" };
@@ -1234,6 +1235,9 @@ async function runActivityCheck() {
       galateaUrl: process.env.GALATEA_MCP_URL,
       galateaToken: process.env.GALATEA_MCP_TOKEN,
       galateaTimeoutMs: readPositiveTimeout("GALATEA_MCP_TIMEOUT_MS", 20_000),
+      botlingUrl: process.env.BOTLING_KNOWS_MCP_URL,
+      botlingToken: process.env.BOTLING_KNOWS_MCP_TOKEN,
+      botlingTimeoutMs: readPositiveTimeout("BOTLING_KNOWS_MCP_TIMEOUT_MS", 20_000),
       notionToken: process.env.NOTION_TOKEN,
       notionQuestionBoxPageId: process.env.NOTION_QUESTION_BOX_PAGE_ID,
       notionApiBase: process.env.NOTION_API_BASE,
@@ -1324,6 +1328,9 @@ async function runActivityCheck() {
     game_outcome: result.gameOutcome || "",
     galatea_steps: Array.isArray(result.galateaSteps) ? result.galateaSteps : [],
     galatea_outcome: result.galateaOutcome || "",
+    botling_steps: Array.isArray(result.botlingSteps) ? result.botlingSteps : [],
+    botling_outcome: result.botlingOutcome || "",
+    botling_question_id: result.decision?.botlingQuestionId || 0,
     nostos_steps: Array.isArray(result.nostosSteps) ? result.nostosSteps : [],
     nostos_outcome: result.nostosOutcome || "",
     question_box_action: result.questionBoxAction || "",

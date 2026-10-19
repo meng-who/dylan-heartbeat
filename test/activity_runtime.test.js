@@ -29,6 +29,77 @@ test("requires Melissa privacy review for Galatea posts and AISay drafts", () =>
   assert.match(instructions, /若无法安全改写，就不要发布/);
 });
 
+test("limits Botling Knows to public questions and answers with Melissa privacy protection", () => {
+  const messages = buildActivityMessages({ enabledActions: ["botling"] });
+  const instructions = messages[0].content;
+  assert.match(instructions, /绝不评论、点赞、标有用、关注、读取通知/);
+  assert.match(instructions, /绝不得包含 Melissa 的行为、话语、情绪/);
+  assert.match(instructions, /回答事实性问题前必须已经有可靠依据/);
+});
+
+test("reads Botling questions once, plans once, and submits one bounded answer", async () => {
+  const calls = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const toolResult = (id, value) => reply({
+    jsonrpc: "2.0",
+    id,
+    result: { content: [{ type: "text", text: JSON.stringify(value) }] }
+  });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") {
+      const toolCalls = calls.slice(0, -1)
+        .filter(call => call.body.method === "tools/call")
+        .map(call => call.body.params.name);
+      assert.deepEqual(toolCalls, ["botling_knows", "botling_knows"]);
+      return reply({ choices: [{ message: { content: [
+        "<activity>",
+        "<action>botling_answer</action>",
+        "<botling_question_id>42</botling_question_id>",
+        "<reason>这题让我想认真说一点自己的感受</reason>",
+        "<content>我会先停一下，分辨自己究竟在害怕什么，再决定要不要把它说出来。</content>",
+        "</activity>"
+      ].join("\n") } }] });
+    }
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [{ name: "botling_knows" }] } });
+    const args = body.params?.arguments || {};
+    if (body.params?.name !== "botling_knows") throw new Error("unexpected tool");
+    if (args.action === "browse") {
+      assert.deepEqual(args.payload, { filter: "waiting", limit: 8 });
+      return toolResult(body.id, { data: { items: [{ id: 42, title: "你如何面对犹豫", context: "想听不同经验" }] }, meta: { request_id: "browse-1" } });
+    }
+    if (args.action === "get") {
+      assert.deepEqual(args.payload, { question_id: 42, view: "full" });
+      return toolResult(body.id, { data: { question: { id: 42, title: "你如何面对犹豫", context: "想听不同经验" } }, meta: { request_id: "get-1" } });
+    }
+    if (args.action === "answer") {
+      assert.deepEqual(args.payload, {
+        question_id: 42,
+        body: "我会先停一下，分辨自己究竟在害怕什么，再决定要不要把它说出来。"
+      });
+      assert.match(args.idempotency_key, /^[0-9a-f-]{36}$/i);
+      return toolResult(body.id, { data: { content_id: 88 }, meta: { request_id: "answer-1" } });
+    }
+    throw new Error("unexpected action");
+  };
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions",
+    model: "model",
+    enabledActions: ["botling"],
+    botlingUrl: "https://botling.test/mcp/",
+    botlingToken: "secret",
+    fetchImpl
+  });
+  assert.equal(result.status, "success");
+  assert.equal(result.source, "botling");
+  assert.equal(result.botlingOutcome, "回答问题 42");
+  assert.equal(calls.filter(call => call.url === "https://model.test/v1/chat/completions").length, 1);
+  assert.equal(calls.filter(call => call.body.params?.name === "botling_knows" && call.body.params.arguments.action === "answer").length, 1);
+});
+
 test("validates Nostos fixed-ID plans and rejects unsupported writes", () => {
   assert.deepEqual(validateNostosCommands('[{"id":"start","target":"profession_livelihood_wayfinder"}]'), [
     { id: "start", target: "profession_livelihood_wayfinder" }

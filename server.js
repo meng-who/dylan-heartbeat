@@ -1503,6 +1503,10 @@ function archivePageHtml() {
               ? "私人读后感："
               : item.action === "forum_lurk"
                 ? "私人感受／待确认回复草稿："
+                : item.action === "botling_ask"
+                  ? "公开提问「" + (item.title || "无标题") + "」："
+                  : item.action === "botling_answer"
+                    ? "公开正式回答："
                 : "已写入内容：";
           candidateText = prefix + item.candidate;
         }
@@ -1541,6 +1545,8 @@ function archivePageHtml() {
       if (item.game_name) details.push("游戏：" + item.game_name);
       if (item.game_outcome) details.push("结果：" + item.game_outcome);
       if (item.galatea_outcome) details.push("花园论坛：" + item.galatea_outcome);
+      if (item.botling_outcome) details.push("小机知道：" + item.botling_outcome);
+      if (item.botling_question_id) details.push("小机知道问题：" + item.botling_question_id);
       if (item.question_id) details.push("提问箱：" + item.question_id);
       if (item.question_box_action) details.push("提问箱动作：" + item.question_box_action);
       if (item.kind === "activity") {
@@ -1589,6 +1595,17 @@ function archivePageHtml() {
         ].filter(Boolean).join("\\n")).join("\\n\\n");
         galateaSteps.append(node("div", "narrative-body", stepText));
         article.append(galateaSteps);
+      }
+      if (item.kind === "activity" && Array.isArray(item.botling_steps) && item.botling_steps.length) {
+        const botlingSteps = node("details", "narrative");
+        botlingSteps.append(node("summary", "", "查看小机知道经过（" + item.botling_steps.length + " 步）"));
+        const stepText = item.botling_steps.map(step => [
+          "第 " + step.number + " 步：" + (step.action === "ask" ? "提出问题" : "正式回答"),
+          "参数：" + JSON.stringify(step.params || {}),
+          step.result ? "返回：" + step.result : ""
+        ].filter(Boolean).join("\\n")).join("\\n\\n");
+        botlingSteps.append(node("div", "narrative-body", stepText));
+        article.append(botlingSteps);
       }
       const remove = node("button", "delete", "删除此条");
       remove.type = "button";
