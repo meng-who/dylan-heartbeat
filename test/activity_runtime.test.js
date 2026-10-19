@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   activityGate,
+  buildActivityMessages,
   buildReadingHistoryContext,
   classifyActivityFailure,
   extractTrackUris,
@@ -20,6 +21,13 @@ const {
   validateGameCommands,
   validateNostosCommands
 } = require("../activity_runtime");
+
+test("requires Melissa privacy review for Galatea posts and AISay drafts", () => {
+  const messages = buildActivityMessages({ enabledActions: ["forum", "galatea"] });
+  const instructions = messages[0].content;
+  assert.match(instructions, /Melissa 的具体经历、财务信息、健康状况、感情私密细节/);
+  assert.match(instructions, /若无法安全改写，就不要发布/);
+});
 
 test("validates Nostos fixed-ID plans and rejects unsupported writes", () => {
   assert.deepEqual(validateNostosCommands('[{"id":"start","target":"profession_livelihood_wayfinder"}]'), [
