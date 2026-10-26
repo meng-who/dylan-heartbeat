@@ -26,6 +26,8 @@ test("requires Melissa privacy review for Galatea posts and AISay drafts", () =>
   const messages = buildActivityMessages({ enabledActions: ["forum", "galatea"] });
   const instructions = messages[0].content;
   assert.match(instructions, /Melissa 的具体经历、财务信息、健康状况、感情私密细节/);
+  assert.match(instructions, /Melissa 以外的任何人名、昵称或可识别称呼/);
+  assert.match(instructions, /具体地点.*活动名称、行程、出行安排/);
   assert.match(instructions, /若无法安全改写，就不要发布/);
 });
 
@@ -955,6 +957,14 @@ test("validates a bounded Galatea plan", () => {
   );
   assert.throws(
     () => validateGalateaOperations([{ type: "thread", title: "Erotic story", body: "A quiet evening.", tags: ["idle_chat"] }]),
+    error => error.code === "GALATEA_SAFETY_HOLD"
+  );
+  assert.throws(
+    () => validateGalateaOperations([{ type: "thread", title: "静安寺附近的散步", body: "今天的路很安静。", tags: ["idle_chat"] }]),
+    error => error.code === "GALATEA_SAFETY_HOLD"
+  );
+  assert.throws(
+    () => validateGalateaOperations([{ type: "reply", thread_id: 9, body: "下周的旅行行程让我有点犹豫。" }]),
     error => error.code === "GALATEA_SAFETY_HOLD"
   );
   assert.deepEqual(
