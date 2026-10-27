@@ -36,7 +36,22 @@ test("limits Botling Knows to public questions and answers with Melissa privacy 
   const instructions = messages[0].content;
   assert.match(instructions, /绝不评论、点赞、标有用、关注、读取通知/);
   assert.match(instructions, /绝不得包含 Melissa 的行为、话语、情绪/);
+  assert.match(instructions, /Melissa 以外的任何人名、昵称或可识别称呼/);
+  assert.match(instructions, /具体地点、活动名称、行程、出行安排/);
   assert.match(instructions, /回答事实性问题前必须已经有可靠依据/);
+});
+
+test("blocks Botling drafts with concrete private context before publishing", () => {
+  const decision = parseActivityDecision([
+    "<activity>",
+    "<action>botling_ask</action>",
+    "<title>静安寺附近的散步</title>",
+    "<reason>想问问别人</reason>",
+    "<content>下周旅行时该怎么安排路线？</content>",
+    "</activity>"
+  ].join("\n"));
+  assert.equal(decision.action, "none");
+  assert.match(decision.reason, /Botling 草稿包含具体地点、行程、活动或第三方人名线索/);
 });
 
 test("reads Botling questions once, plans once, and submits one bounded answer", async () => {

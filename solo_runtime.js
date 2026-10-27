@@ -1,6 +1,9 @@
 const { OmbreMcpClient, hasRecallEvidence } = require("./ombre_mcp_client");
 const { parseChatCompletionResponse } = require("./upstream_response");
 
+const SOLO_NOTIFY_TITLE_MAX_CHARS = 30;
+const SOLO_NOTIFY_BODY_MAX_CHARS = 180;
+
 function joinUrl(base, path) {
   return `${String(base || "").replace(/\/+$/, "")}${path}`;
 }
@@ -100,6 +103,7 @@ narrative 写作要求：
 你不需要调用任何工具。完成后自行决定是否想给用户发一条消息；不想联系完全可以。
 solo_notify 是普通手机文字推送，不是语音、音频、电话或 TTS 台词。请使用与日常聊天一致的自然中文；除专有名词或无法避免的短词外，不要用英文。
 推送中不要写方括号语气标签、舞台提示或声音说明，例如 [softly]、[whispers]、[轻声]。
+如果选择发送，标题最多 ${SOLO_NOTIFY_TITLE_MAX_CHARS} 字，正文最多 ${SOLO_NOTIFY_BODY_MAX_CHARS} 字，用一至两句自然中文说完，不要把完整 Solo 经过塞进推送。
 
 只输出下面这一份标签结果。不要输出 thinking、分析过程、草稿、引号块、Markdown、代码围栏或任何解释。正文可以自由使用引号和换行，不需要 JSON 转义：
 <solo_result>
@@ -207,8 +211,8 @@ function parseSoloResult(text, expectedMode) {
   const narrative = String(value.narrative || "").trim();
   if (!summary || !narrative) throw new Error("Solo 模型结果缺少摘要或经过");
   const send = Boolean(value.notify?.send);
-  const title = String(value.notify?.title || "").trim().slice(0, 80);
-  const body = String(value.notify?.body || "").trim().slice(0, 500);
+  const title = String(value.notify?.title || "").trim().slice(0, SOLO_NOTIFY_TITLE_MAX_CHARS);
+  const body = String(value.notify?.body || "").trim().slice(0, SOLO_NOTIFY_BODY_MAX_CHARS);
   return {
     mode,
     intensity,
@@ -239,8 +243,8 @@ function sanitizeSoloNotification(notify = {}) {
     return latinWords.length >= 2 && (cjkCount === 0 || latinLetters > cjkCount * 2);
   };
 
-  let title = clean(notify.title).slice(0, 80);
-  const body = clean(notify.body).slice(0, 500);
+  let title = clean(notify.title).slice(0, SOLO_NOTIFY_TITLE_MAX_CHARS);
+  const body = clean(notify.body).slice(0, SOLO_NOTIFY_BODY_MAX_CHARS);
   if (!body) return { send: false, title: "", body: "", repairs: [...new Set(repairs)], suppressedReason: "empty_after_voice_cue_cleanup" };
   if (mostlyEnglish(body)) return { send: false, title: "", body: "", repairs: [...new Set(repairs)], suppressedReason: "english_voice_style" };
   if (title && /[A-Za-z]/.test(title) && !/[\u3400-\u9fff]/.test(title)) {

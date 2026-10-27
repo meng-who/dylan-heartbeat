@@ -20,6 +20,15 @@ test("desire rises over time and an eligible idle period can claim a solo run", 
   assert.equal(claimed.claim.mode, "recall");
 });
 
+test("solo desire now accumulates at the slower passive rate", () => {
+  const start = Date.UTC(2026, 8, 4, 4, 0, 0);
+  const state = createDefaultState(start);
+  state.solo.desire = 0.4;
+  const advanced = decayState(state, start + 4 * 3_600_000, "Asia/Shanghai");
+  assert.ok(advanced.solo.desire > 0.427);
+  assert.ok(advanced.solo.desire < 0.43);
+});
+
 test("solo does not claim before idle threshold or during cooldown", () => {
   const now = Date.UTC(2026, 8, 4, 12, 0, 0);
   const state = createDefaultState(now);

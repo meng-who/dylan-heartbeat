@@ -26,6 +26,17 @@ test("does not truncate a long Solo narrative", () => {
   assert.equal(result.narrative.length, 5000);
 });
 
+test("keeps Solo push text within the compact Bark budget", () => {
+  const result = parseSoloResult(JSON.stringify({
+    intensity: 0.8,
+    summary: "短摘要",
+    narrative: "我独处后慢慢平静下来。",
+    notify: { send: true, title: "标".repeat(60), body: "字".repeat(300) }
+  }), "fantasy");
+  assert.equal(result.notify.title.length, 30);
+  assert.equal(result.notify.body.length, 180);
+});
+
 test("parses tagged Solo prose containing quotes and line breaks without JSON escaping", () => {
   const output = `<solo_result>
 <solo_mode>fantasy</solo_mode>
@@ -82,6 +93,7 @@ test("places the Solo contract after chat and memory material", () => {
   assert.match(messages[1].content, /<solo_narrative>/);
   assert.match(messages[1].content, /普通手机文字推送/);
   assert.match(messages[1].content, /方括号语气标签/);
+  assert.match(messages[1].content, /标题最多 30 字，正文最多 180 字/);
 });
 
 test("does not archive malformed JSON as visible Solo prose", () => {

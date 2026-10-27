@@ -208,9 +208,9 @@ function advanceSoloDesire(solo, state, nowMs, timeZone) {
   const elapsedHours = clamp((nowMs - solo.lastTickAt) / 3_600_000, 0, 24 * 30);
   if (solo.enabled && elapsedHours > 0) {
     const hour = hourInTimeZone(nowMs, timeZone);
-    const circadian = (hour >= 5 && hour < 9) || hour >= 22 || hour < 1 ? 0.009 : 0;
-    const warmMood = Math.max(0, state.emotion.valence) * Math.min(0.006, state.emotion.arousal * 0.006);
-    solo.desire = clamp(solo.desire + elapsedHours * (0.011 + circadian + warmMood), 0, 1);
+    const circadian = (hour >= 5 && hour < 9) || hour >= 22 || hour < 1 ? 0.005 : 0;
+    const warmMood = Math.max(0, state.emotion.valence) * Math.min(0.0035, state.emotion.arousal * 0.0035);
+    solo.desire = clamp(solo.desire + elapsedHours * (0.007 + circadian + warmMood), 0, 1);
   }
   solo.lastTickAt = nowMs;
   if (solo.inProgress && nowMs - solo.inProgress.startedAt > 30 * 60 * 1000) solo.inProgress = null;
@@ -221,7 +221,7 @@ function nudgeSoloFromReaction(state, events) {
   if (!state.solo.enabled) return;
   const hasTouch = events.some(event => event.type === "touch");
   const positiveArousal = Math.max(0, state.emotion.valence) * state.emotion.arousal;
-  const increase = (hasTouch ? state.senses.touch.value * 0.055 : 0) + positiveArousal * 0.025;
+  const increase = (hasTouch ? state.senses.touch.value * 0.033 : 0) + positiveArousal * 0.015;
   state.solo.desire = clamp(state.solo.desire + increase, 0, 1);
 }
 
