@@ -138,4 +138,12 @@ test("classifies sent, blocked and silent wake outcomes", () => {
     buildWakeArchiveOutcome("（2026-09-10 12:00 自动唤醒：本次未发送推送）", { noAction: true }).status,
     "no_action"
   );
+  assert.deepEqual(
+    buildWakeArchiveOutcome("（2026-09-10 12:00 自动唤醒：本次未发送推送｜原因：刚聊过这个话题，没有新的内容）", { noAction: true }),
+    { status: "no_action", reason: "刚聊过这个话题，没有新的内容", final_title: "", final_body: "" }
+  );
+  assert.equal(
+    buildWakeArchiveOutcome("（2026-09-10 12:00 自动唤醒：本次未发送推送｜原因：和近期推送含义重复）", { noAction: true }).status,
+    "no_action"
+  );
 });

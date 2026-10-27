@@ -66,7 +66,7 @@ function parseNoActionDirective(text) {
   const reason = (after || before)
     .replace(/^原因[：:]\s*/, "")
     .replace(/^[|｜,，。:：;；\s]+|[|｜,，。:：;；\s]+$/g, "")
-    .slice(0, 20);
+    .slice(0, 80);
   return { matched: true, reason };
 }
 

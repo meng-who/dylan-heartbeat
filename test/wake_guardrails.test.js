@@ -82,6 +82,13 @@ test("recognizes common no-action marker variants", () => {
   assert.equal(parseNoActionDirective("稍后再说 [NO ACTION]").matched, true);
 });
 
+test("keeps a concrete no-action reason without the old short truncation", () => {
+  assert.deepEqual(
+    parseNoActionDirective("[NO_ACTION] 原因：刚刚已经聊过这个话题，现在没有新的内容值得重复打扰你"),
+    { matched: true, reason: "刚刚已经聊过这个话题，现在没有新的内容值得重复打扰你" }
+  );
+});
+
 test("does not mistake ordinary text for a no-action directive", () => {
   assert.deepEqual(
     parseNoActionDirective("今天想给你发一条消息"),

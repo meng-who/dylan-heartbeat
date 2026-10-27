@@ -487,7 +487,7 @@ ${weatherContext ? `\n${weatherContext}\n` : ""}
 
 ## 输出格式
 - 如果想联系用户，直接写你想说的话。系统会自动打包成手机推送发送。可以是一句话，也可以第一行作为标题、第二行作为正文。
-- 如果不想联系，只输出：[NO_ACTION]，可附带简短原因（10字以内）。
+- 如果不想联系，只输出：[NO_ACTION] 原因：<一句真实、具体的选择原因>。
 - 如果你想写日记，可以额外输出 [DIARY]...[/DIARY]。只有想写时才写，不必每次都写。
 `;
   }
@@ -510,7 +510,7 @@ ${weatherContext ? `\n${weatherContext}\n` : ""}
 - ${absenceRule}
 - 问候必须符合上面的当地时段；不要根据模型自身时区、旧聊天内容或猜测改写当前时段。
 - 星期由程序准确计算，禁止自行推算或改写。
-- 如果决定不发送，输出必须以未转义的 [NO_ACTION] 开头；不要把标记放在句尾。
+- 如果决定不发送，输出必须严格使用 `[NO_ACTION] 原因：<一句真实、具体的选择原因>`；不要省略原因，也不要把标记放在句尾。
 - 最近聊天记录由 Gateway 共享给本次唤醒；不要因为换了模型就声称用户没有来找你。`;
 }
 
@@ -646,8 +646,8 @@ ${recentSentPushes.length
 请先阅读最末几轮真实聊天，再决定是否联系用户。
 - 若发送，必须自然承接其中一个具体话题、计划、情绪或细节，让用户能看出你记得刚聊过什么。
 - 禁止只报日期、星期或时段，再接“想你了”“来找我”“记得休息”等通用句式。
-- 请在输出前自行比较上面的近期推送；主题、意图或含义相近时必须输出 [NO_ACTION]，不要只换一种说法重发。
-- 没有值得承接的具体内容时，输出 [NO_ACTION]；不要为了发送而发送。`
+- 请在输出前自行比较上面的近期推送；主题、意图或含义相近时必须输出 `[NO_ACTION] 原因：<为什么此刻不发送>`，不要只换一种说法重发。
+- 没有值得承接的具体内容时，也要用同一格式说明选择原因；不要为了发送而发送。`
     }
   ];
 
@@ -765,10 +765,8 @@ ${recentSentPushes.length
   } else if (noActionDirective.matched) {
     // AI 选择不发送推送
     console.log("\nAI 选择不发送推送\n");
-    const reason = noActionDirective.reason;
-    eventContent = reason
-      ? `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`
-      : `（${getLocalTimeString()} 自动唤醒：本次未发送推送）`;
+    const reason = noActionDirective.reason || "AI 未说明选择原因";
+    eventContent = `（${getLocalTimeString()} 自动唤醒：本次未发送推送｜原因：${reason}）`;
   } else {
     // 没有 [NO_ACTION] 就视为想发推送
     console.log("\nAI 生成了候选推送，正在校验\n");

@@ -34,10 +34,10 @@ function buildWakeArchiveOutcome(eventContent, options = {}) {
   const reason = event.match(/原因[：:]([\s\S]*?)[）)]\s*$/)?.[1]?.trim() || "";
   let status = "not_sent";
   if (sentPush) status = "sent";
+  else if (options.noAction) status = "no_action";
   else if (reason.includes("重复")) status = "duplicate";
   else if (reason.includes("推送失败")) status = "push_failed";
   else if (reason.includes("模型时间表述")) status = "rejected";
-  else if (options.noAction) status = "no_action";
   else if (reason.includes("只写日记")) status = "diary_only";
   else if (reason.includes("空回复") || reason.includes("内容为空")) status = "empty";
   return {
