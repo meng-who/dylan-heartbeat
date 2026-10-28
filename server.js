@@ -1480,6 +1480,8 @@ function archivePageHtml() {
         const wasExecuted = item.status === "success";
         const summaryLabel = wasExecuted
           ? "选择原因："
+          : item.safety_hold
+            ? "发布被安全检查拦截："
           : item.status === "kept_private"
             ? "没有行动："
             : "本次构想（未执行）：";

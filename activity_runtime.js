@@ -199,7 +199,11 @@ function parseActivityDecision(value) {
       return {
         ...decision,
         action: "none",
-        reason: `${decision.reason ? `${decision.reason}；` : ""}Galatea 草稿未通过公开内容安全检查，未发布`
+        safetyHold: true,
+        blockedSource: "galatea",
+        content: (typeof parsed.operations === "string" ? parsed.operations : JSON.stringify(parsed.operations, null, 2)).slice(0, 24000),
+        blockedReason: error.message,
+        reason: `${decision.reason ? `${decision.reason}；` : ""}Galatea 草稿未通过公开内容安全检查，未发布：${error.message}`
       };
     }
   }
@@ -270,12 +274,14 @@ function validateGalateaOperations(value) {
       throw new Error("Activity 的 Galatea 第 " + (index + 1) + " 个动作必须使用纯文本");
     }
     if (GALATEA_SEXUAL_CONTENT_PATTERN.test(`${operation.title || ""}\n${body}`)) {
-      const error = new Error("Galatea 草稿触发非性内容保护，已阻止发布");
+      const hit = `${operation.title || ""}\n${body}`.match(GALATEA_SEXUAL_CONTENT_PATTERN)?.[0];
+      const error = new Error(`Galatea 草稿触发非性内容保护（命中：${hit}），已阻止发布`);
       error.code = "GALATEA_SAFETY_HOLD";
       throw error;
     }
     if (PUBLIC_POST_PRIVATE_CONTEXT_PATTERN.test(`${operation.title || ""}\n${body}`)) {
-      const error = new Error("Galatea 草稿包含具体地点、行程、活动或人名线索，已阻止发布");
+      const hit = `${operation.title || ""}\n${body}`.match(PUBLIC_POST_PRIVATE_CONTEXT_PATTERN)?.[0];
+      const error = new Error(`Galatea 草稿包含具体地点、行程、活动或人名线索（命中：${hit}），已阻止发布`);
       error.code = "GALATEA_SAFETY_HOLD";
       throw error;
     }
@@ -1524,7 +1530,7 @@ async function runActivityCycle(options) {
         })
       );
   if (decision.action === "none") {
-    return { ran: true, status: "kept_private", decision, source: "private" };
+    return { ran: true, status: "kept_private", decision, source: decision.blockedSource || "private", reason: decision.blockedReason || "" };
   }
 
   try {

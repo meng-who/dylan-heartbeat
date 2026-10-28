@@ -1311,6 +1311,7 @@ async function runActivityCheck() {
     source: result.source || "activity",
     action: result.decision?.action || "activity_cycle",
     summary: result.decision?.reason || "",
+    safety_hold: Boolean(result.decision?.safetyHold),
     query: result.decision?.query || "",
     candidate: result.decision?.content || "",
     title: result.decision?.title || "",

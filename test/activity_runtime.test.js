@@ -22,6 +22,16 @@ const {
   validateNostosCommands
 } = require("../activity_runtime");
 
+test("retains blocked Galatea drafts privately with the matching safety clue", () => {
+  const operations = [{ type: "reply", thread_id: 31699, body: "下周旅行让我想到一些小事。" }];
+  const decision = parseActivityDecision(JSON.stringify({ action: "galatea_publish", reason: "想回复", operations }));
+  assert.equal(decision.action, "none");
+  assert.equal(decision.safetyHold, true);
+  assert.equal(decision.blockedSource, "galatea");
+  assert.deepEqual(JSON.parse(decision.content), operations);
+  assert.match(decision.blockedReason, /命中：旅行/);
+});
+
 test("requires Melissa privacy review for Galatea posts and AISay drafts", () => {
   const messages = buildActivityMessages({ enabledActions: ["forum", "galatea"] });
   const instructions = messages[0].content;
