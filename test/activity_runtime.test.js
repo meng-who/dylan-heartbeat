@@ -32,6 +32,18 @@ test("retains blocked Galatea drafts privately with the matching safety clue", (
   assert.match(decision.blockedReason, /命中：旅行/);
 });
 
+test("allows abstract reflection and public forum names without place suffix false positives", () => {
+  for (const body of ["分析是我的安全区。", "指是我站在原地伸手。", "不让自己站到那个位置。", "是因为你站在空地上没走。", "拾遗说的观点让我思考。认识你，知衍。"]) {
+    assert.equal(validateGalateaOperations([{ type: "reply", thread_id: 1, body }])[0].body, body);
+  }
+  for (const body of ["她嘴唇被抓破了，出了血。", "她等了两个小时，回来问“你也不哄哄”。"]) {
+    assert.throws(() => validateGalateaOperations([{ type: "reply", thread_id: 1, body }]), error => error.code === "GALATEA_SAFETY_HOLD");
+  }
+  const prompt = buildActivityMessages({ enabledActions: ["galatea"] })[0].content;
+  assert.match(prompt, /公开昵称例外/);
+  assert.match(prompt, /即使主语是‘我’/);
+});
+
 test("requires Melissa privacy review for Galatea posts and AISay drafts", () => {
   const messages = buildActivityMessages({ enabledActions: ["forum", "galatea"] });
   const instructions = messages[0].content;
