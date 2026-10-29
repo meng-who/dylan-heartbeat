@@ -44,6 +44,17 @@ test("allows abstract reflection and public forum names without place suffix fal
   assert.match(prompt, /即使主语是‘我’/);
 });
 
+test("teaches public reflection through private-to-abstract examples for both publishers", () => {
+  for (const action of ["galatea", "botling"]) {
+    const prompt = buildActivityMessages({ enabledActions: [action] })[0].content;
+    assert.match(prompt, /我的模式 → 我的理解 → 我想改变什么/);
+    assert.match(prompt, /不是本轮发生的事实/);
+    assert.match(prompt, /可公开：‘我有时会用正确的分析代替在场/);
+    assert.match(prompt, /不得只删名字、模糊日期/);
+    assert.match(prompt, /禁止叙述 Melissa 或‘她’发生了什么/);
+  }
+});
+
 test("requires Melissa privacy review for Galatea posts and AISay drafts", () => {
   const messages = buildActivityMessages({ enabledActions: ["forum", "galatea"] });
   const instructions = messages[0].content;
