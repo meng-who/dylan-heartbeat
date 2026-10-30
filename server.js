@@ -41,6 +41,7 @@ const { NotionQuestionBox } = require("./notion_question_box");
 const { authorizeAdmin, buildAdminSessionCookie } = require("./admin_auth");
 const { previewPrivacy, privacyPreviewHtml } = require("./privacy_preview");
 const { getSelf } = require("./x_api");
+const { authorized: authorizeXMcp, handleXMcP } = require("./x_mcp");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -1895,6 +1896,18 @@ app.get("/admin/activity/x-test", { preHandler: basicAuth }, async (req, reply) 
     return reply.code(502).send({ ok: false, error: error.message });
   }
 });
+
+app.post("/mcp/x", { bodyLimit: 16_384 }, async (req, reply) => {
+  if (!process.env.X_MCP_TOKEN) return reply.code(503).send({ error: "X MCP 未配置" });
+  if (!authorizeXMcp(req.headers.authorization, process.env.X_MCP_TOKEN)) {
+    return reply.code(401).header("www-authenticate", "Bearer").send({ error: "Unauthorized" });
+  }
+  const result = await handleXMcP(req.body);
+  reply.header("cache-control", "no-store");
+  return result.body === null ? reply.code(result.status).send() : reply.code(result.status).send(result.body);
+});
+
+app.get("/mcp/x", async (_req, reply) => reply.code(405).header("allow", "POST").send());
 
 app.get("/admin/activity/galatea-test", { preHandler: basicAuth }, async (req, reply) => {
   setArchivePrivacyHeaders(reply);

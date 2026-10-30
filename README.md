@@ -443,7 +443,7 @@ ADMIN_SESSION_DAYS=180
 ```
 
 - `AUTONOMY_NIGHT_ONLY`：默认 `false`，白天和夜间都可活动；设为 `true` 才会限制为夜间。
-- `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`books`、`games`、`question_box`、`galatea` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。`forum` 只会潜水读取已加入的公开房间并把感受或回复草稿存入私人 Archive，绝不会自动加群或发言；为兼容旧部署，启用 `forum` 时也会同时提供只读书店活动。若只想读书、不想潜水，可单独填写 `books`。
+- `AUTONOMY_ACTIONS`：用逗号选择能力，可填 `spotify`、`ombre`、`forum`、`books`、`games`、`question_box`、`galatea`、`x` 或任意组合；未填写时为兼容旧部署，默认只有 `spotify`。`forum` 只会潜水读取已加入的公开房间并把感受或回复草稿存入私人 Archive，绝不会自动加群或发言；为兼容旧部署，启用 `forum` 时也会同时提供只读书店活动。若只想读书、不想潜水，可单独填写 `books`。
 - Galatea Activity 会在模型请求前读取当前身份、最新帖子、帖子完整正文与回复，以及自己的近期公开活动。模型只调用一次，可一次规划最多 3 个写动作，其中最多 1 个新主题；程序随后机械完成每项 `create_thread` / `create_reply` 的两段式确认，不再请求模型。回复只能指向本轮完整读取过的帖子；不会调用删除、点赞、关注、资料修改、游戏、漂流瓶或会消耗通知的工具。每一步参数与最终回执都会加密写入 Archive。
 - Books Activity 会从加密 Archive 自动整理全部可识别的成功阅读记录，以 `book_id + chapter_no` 建立阅读履历。它优先续读最近读过且已有新章的书，并避开重复章节；模型只收到最多 10 本书的压缩章节范围和本轮正文，不注入旧读后感，也不增加模型请求次数。
 - Question Box Activity 会在模型请求前只读 Notion：有 Melissa 未回答的问题时，本轮只允许回答其中一题；没有待答问题时，可提一个新问题、给最近的已完成问答补后记，或不行动。Notion 可发生多次确定性读写，但整轮仍只调用一次模型。写入前会重新读取页面，避免重复回答。
@@ -464,6 +464,12 @@ ADMIN_SESSION_DAYS=180
 - `BOTLING_KNOWS_MCP_URL`：填写 `https://botlingknows.com/mcp/`。`BOTLING_KNOWS_MCP_TOKEN` 填写 Botling Knows 原始 token，客户端会自动发送 `Authorization: Bearer <token>`；不要将 token 拼进 URL，也不要手动加 `Bearer ` 前缀。`BOTLING_KNOWS_MCP_TIMEOUT_MS` 默认 20000。
 
 Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CHECK_INTERVAL_MINUTES` 或普通唤醒阈值影响。它与 Wake/Solo 恰好撞车时只会跳过这一次条件检查，稍后按自己的频率重试，避免同时调用两个模型。
+
+### X 发帖与 Kelivo 聊天工具
+
+在 Render 配置 `X_API_KEY`、`X_API_SECRET`、`X_ACCESS_TOKEN`、`X_ACCESS_TOKEN_SECRET` 和 `GEMINI_API_KEY`。先打开 `/admin/activity/x-test`，确认只读连接返回 `"ok":true` 和预期用户名。想让自动唤醒自主发帖、回复自己帖子下的新评论，再把 `x` 加入现有 `AUTONOMY_ACTIONS`，不要覆盖其他已启用动作。每天最多原创 1 条、回复 3 条；没有合适内容时可以不发。
+
+想在 Kelivo 聊天里调用 X，还需在 Render 新增独立随机密钥 `X_MCP_TOKEN`。Kelivo「设置 → MCP」添加 Streamable HTTP 服务器，地址填 `https://你的Render域名/mcp/x`，请求头填 `Authorization: Bearer 你的X_MCP_TOKEN`。启用 `x_get_context`、`x_post`、`x_reply`；建议把两个写工具设为每次询问。X API 凭证只留在 Render，不填入 Kelivo。MCP 写工具也会经过隐私审核，回复目标必须是自己近期帖子下当前可读的直接评论。
 
 部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test`、`/admin/activity/forum-test`、`/admin/activity/games-test`、`/admin/activity/notion-test`、`/admin/activity/galatea-test` 和 `/admin/activity/botling-knows-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。AISay 测试入口只调用无副作用的 `cli({command:"help"})` 并返回指令指南；可用 `/admin/activity/forum-test?path=bookstore.read` 等路径继续查询领域或完整命令。游戏测试默认只调用 `list_games`；传入 `/admin/activity/games-test?game=fishing` 时还会只读调用该游戏的 `get_guide`；再加 `&inspect=help` 会固定调用只读的 `play(game, action="help", params={})`。Notion 测试入口只读取页面并返回识别到的题目、待答题与下一个题号。Galatea 测试入口只初始化 MCP 并核对 `get_self`、`list_threads`、`get_thread`、`list_activity`、`create_thread`、`create_reply` 六项契约，不会真的调用写工具。Botling Knows 测试入口默认只初始化 MCP 并读取工具契约；加 `?help=browse`、`?help=search`、`?help=ask`、`?help=answer` 或 `?help=comment` 会仅读取相应行为指南，不会执行该行为。确认结果正确后再把对应动作加入 `AUTONOMY_ACTIONS`。这些入口不会开局、游玩、修改账号、写入 Notion 或调用模型。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
 
