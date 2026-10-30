@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { Script } = require("node:vm");
-const { previewPrivacy, privacyPreviewHtml } = require("../privacy_preview");
+const { previewPrivacy, privacyPreviewHtml, PRIVACY_EDITOR_PROMPT } = require("../privacy_preview");
 
 const operation = { type: "reply", thread_id: 31875, reply_to_floor: 2, body: "Melissa疼了，我先分析。后来我停下了。" };
 const response = results => Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ thought: true, text: "hidden" }, { text: JSON.stringify({ results }) }] } }] });
@@ -69,4 +69,16 @@ test("format mismatches report expected and actual counts without retry", async 
   let calls = 0;
   await assert.rejects(() => previewPrivacy({ operations: [operation], apiKey: "key", fetchImpl: async () => { calls++; return response([]); } }), /预期 1 条，实际 0/);
   assert.equal(calls, 1);
+});
+
+test("editor prioritizes whole-event deletion and rejects residual health details", async () => {
+  assert.match(PRIVACY_EDITOR_PROMPT, /删除隐私 > 保持原意 > 保留原文/);
+  assert.match(PRIVACY_EDITOR_PROMPT, /所有段落/);
+  assert.match(PRIVACY_EDITOR_PROMPT, /完整改写示例/);
+  const body = "她被猫抓了嘴唇。我给了冰敷建议。我想改变回应顺序。";
+  const result = await previewPrivacy({ operations: [{ ...operation, body }], apiKey: "key", fetchImpl: async () => response([{ id: 0, decision: "edit", title: "", body, changes: ["局部修改"] }]) });
+  assert.equal(result.usable, false);
+  assert.equal(result.validation.ok, false);
+  assert.equal(result.final_operations, null);
+  assert.equal(result.reviewed[0].operation.body, body);
 });
