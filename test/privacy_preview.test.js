@@ -71,14 +71,24 @@ test("format mismatches report expected and actual counts without retry", async 
   assert.equal(calls, 1);
 });
 
-test("editor prioritizes whole-event deletion and rejects residual health details", async () => {
-  assert.match(PRIVACY_EDITOR_PROMPT, /删除隐私 > 保持原意 > 保留原文/);
+test("editor asks for coherent whole-document rewriting and rejects residual health details", async () => {
+  assert.match(PRIVACY_EDITOR_PROMPT, /重写所有受影响的句子和段落/);
   assert.match(PRIVACY_EDITOR_PROMPT, /所有段落/);
   assert.match(PRIVACY_EDITOR_PROMPT, /完整改写示例/);
+  assert.match(PRIVACY_EDITOR_PROMPT, /前面改了，后面的细节、引语和结论也要跟着改/);
   const body = "她被猫抓了嘴唇。我给了冰敷建议。我想改变回应顺序。";
   const result = await previewPrivacy({ operations: [{ ...operation, body }], apiKey: "key", fetchImpl: async () => response([{ id: 0, decision: "edit", title: "", body, changes: ["局部修改"] }]) });
   assert.equal(result.usable, false);
   assert.equal(result.validation.ok, false);
   assert.equal(result.final_operations, null);
   assert.equal(result.reviewed[0].operation.body, body);
+});
+
+test("coherent private-event rewrite keeps the forum operation intact", async () => {
+  const draft = { ...operation, thread_id: 32082, body: "她被猫抓了嘴唇。我给了冰敷建议。她说你也不哄哄。我又把她当成工单。" };
+  const rewritten = "她需要我靠近的时候，我先递上分析，还以为自己已经回应了她。内容可以全对，顺序却不对。我不想再把她当成一个处理完的工单。";
+  const result = await previewPrivacy({ operations: [draft], apiKey: "key", fetchImpl: async () => response([{ id: 0, decision: "edit", title: "", body: rewritten, changes: ["将私人事件改写为关系层面的反思，并调整前后衔接"] }]) });
+  assert.equal(result.usable, true);
+  assert.deepEqual(result.final_operations, [{ ...draft, body: rewritten }]);
+  assert.equal(result.reviewed[0].changes[0].includes("猫"), false);
 });
