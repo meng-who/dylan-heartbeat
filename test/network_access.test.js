@@ -36,6 +36,12 @@ test("allows the public password-protected Pulse dashboard proxy", () => {
   assert.equal(access.allow, true);
 });
 
+test("passes only the X MCP endpoint through to its own bearer authentication", () => {
+  assert.equal(decide({ path: "/mcp/x" }).allow, true);
+  assert.equal(decide({ path: "/mcp/x?session=1" }).allow, true);
+  assert.equal(decide({ path: "/mcp/other" }).allow, false);
+});
+
 test("allows Render wake-up callbacks with the gateway key", () => {
   assert.equal(decide({ path: "/internal/wake-event", headerKey: "gateway-test-key" }).allow, true);
   assert.equal(decide({ path: "/internal/heartbeat", headerKey: "wrong" }).allow, false);
