@@ -40,6 +40,7 @@ const { RemoteMcpClient } = require("./remote_mcp_client");
 const { NotionQuestionBox } = require("./notion_question_box");
 const { authorizeAdmin, buildAdminSessionCookie } = require("./admin_auth");
 const { previewPrivacy, privacyPreviewHtml } = require("./privacy_preview");
+const { getSelf } = require("./x_api");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -1881,6 +1882,17 @@ app.post("/admin/activity/privacy-test", { preHandler: basicAuth, bodyLimit: 400
     return await previewPrivacy({ operations: req.body?.operations, apiKey: process.env.GEMINI_API_KEY });
   } catch (error) {
     return reply.code(400).send({ ok: false, error: error.message });
+  }
+});
+
+app.get("/admin/activity/x-test", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  try {
+    const self = await getSelf({ env: process.env });
+    return { ok: true, username: self?.username || "", user_id: self?.id || "" };
+  } catch (error) {
+    req.log.error({ event: "x_activity_read_only_test_failed", error: error.message });
+    return reply.code(502).send({ ok: false, error: error.message });
   }
 });
 

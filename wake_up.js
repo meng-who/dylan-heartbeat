@@ -1093,6 +1093,7 @@ async function runActivityCheck() {
   if (enabledActions.includes("question_box")) required.push("NOTION_TOKEN", "NOTION_QUESTION_BOX_PAGE_ID");
   if (enabledActions.includes("galatea") || enabledActions.includes("nostos")) required.push("GALATEA_MCP_URL", "GALATEA_MCP_TOKEN");
   if (enabledActions.includes("botling")) required.push("BOTLING_KNOWS_MCP_URL", "BOTLING_KNOWS_MCP_TOKEN");
+  if (enabledActions.includes("x")) required.push("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET", "GEMINI_API_KEY");
   if (!enabledActions.length) {
     console.warn(JSON.stringify({ event: "activity_config_missing", variables: ["AUTONOMY_ACTIONS"] }));
     return { ran: false, reason: "not_configured" };
@@ -1212,6 +1213,10 @@ async function runActivityCheck() {
       latestUserText: latestUserText ? normalizeContentToText(latestUserText.content) : "",
       readingHistory,
       enabledActions,
+      xEnv: process.env,
+      xSeenReplies: Array.isArray(nextState.x_seen_replies) ? nextState.x_seen_replies : [],
+      xPostsToday: nextState.x_date === gate.date ? nextState.x_posts_today || 0 : 0,
+      xRepliesToday: nextState.x_date === gate.date ? nextState.x_replies_today || 0 : 0,
       forceGame: process.env.AUTONOMY_TEST_FORCE_GAME,
       playlistName: process.env.SPOTIFY_PLAYLIST_NAME || "自主收藏",
       spotifyUrl: process.env.SPOTIFY_MCP_URL,
@@ -1247,6 +1252,20 @@ async function runActivityCheck() {
     if (result.trackUri && result.status === "success") {
       nextState.recent_track_uris.push(result.trackUri);
       if (result.decision?.query) nextState.recent_track_queries.push(result.decision.query);
+      saveActivityState(nextState);
+    }
+    if (result.xReplyId && result.status === "success") {
+      nextState.x_seen_replies = [...new Set([...(nextState.x_seen_replies || []), result.xReplyId])].slice(-500);
+      saveActivityState(nextState);
+    }
+    if (result.xPostId && result.status === "success") {
+      if (nextState.x_date !== gate.date) {
+        nextState.x_date = gate.date;
+        nextState.x_posts_today = 0;
+        nextState.x_replies_today = 0;
+      }
+      if (result.decision?.action === "x_post") nextState.x_posts_today += 1;
+      if (result.decision?.action === "x_reply") nextState.x_replies_today += 1;
       saveActivityState(nextState);
     }
   } catch (error) {
