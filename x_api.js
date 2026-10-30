@@ -86,7 +86,7 @@ async function getDirectReplies(postId, options = {}) {
 async function createPost(text, { replyTo, ...options } = {}) {
   if (typeof text !== "string" || !text.trim() || [...text].length > 280) throw new Error("X 帖子正文须为 1–280 个字符");
   if (replyTo && !/^\d{1,19}$/.test(String(replyTo))) throw new Error("无效的 X 回复目标 ID");
-  const body = { text: text.trim(), ...(replyTo ? { reply: { in_reply_to_tweet_id: String(replyTo) } } : {}) };
+  const body = { text, ...(replyTo ? { reply: { in_reply_to_tweet_id: String(replyTo) } } : {}) };
   return (await requestX("POST", "/2/tweets", { ...options, body })).data;
 }
 

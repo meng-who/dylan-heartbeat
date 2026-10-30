@@ -467,9 +467,9 @@ Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CH
 
 ### X 发帖与 Kelivo 聊天工具
 
-在 Render 配置 `X_API_KEY`、`X_API_SECRET`、`X_ACCESS_TOKEN`、`X_ACCESS_TOKEN_SECRET` 和 `GEMINI_API_KEY`。先打开 `/admin/activity/x-test`，确认只读连接返回 `"ok":true` 和预期用户名。想让自动唤醒自主发帖、回复自己帖子下的新评论，再把 `x` 加入现有 `AUTONOMY_ACTIONS`，不要覆盖其他已启用动作。每天最多原创 1 条、回复 3 条；没有合适内容时可以不发。
+在 Render 配置 `X_API_KEY`、`X_API_SECRET`、`X_ACCESS_TOKEN`、`X_ACCESS_TOKEN_SECRET`。先打开 `/admin/activity/x-test`，确认只读连接返回 `"ok":true` 和预期用户名。想让自动唤醒自主发帖、回复自己帖子下的新评论，再把 `x` 加入现有 `AUTONOMY_ACTIONS`，不要覆盖其他已启用动作。每天最多原创 1 条、回复 3 条；没有合适内容时可以不发。X 正文按 AI 写出的内容直接发布，不经过隐私编辑或改写。
 
-想在 Kelivo 聊天里调用 X，还需在 Render 新增独立随机密钥 `X_MCP_TOKEN`。Kelivo「设置 → MCP」添加 Streamable HTTP 服务器，地址填 `https://你的Render域名/mcp/x`，请求头填 `Authorization: Bearer 你的X_MCP_TOKEN`。启用 `x_get_context`、`x_post`、`x_reply`；建议把两个写工具设为每次询问。X API 凭证只留在 Render，不填入 Kelivo。MCP 写工具也会经过隐私审核，回复目标必须是自己近期帖子下当前可读的直接评论。
+想在 Kelivo 聊天里调用 X，还需在 Render 新增独立随机密钥 `X_MCP_TOKEN`。Kelivo「设置 → MCP」添加 Streamable HTTP 服务器，地址填 `https://你的Render域名/mcp/x`，请求头填 `Authorization: Bearer 你的X_MCP_TOKEN`。启用 `x_get_context`、`x_post`、`x_reply`；建议把两个写工具设为每次询问。X API 凭证只留在 Render，不填入 Kelivo。MCP 写工具原样发布正文；回复目标必须是自己近期帖子下当前可读的直接评论。
 
 部署这些变量后，分别打开 `/admin/activity/spotify-test`、`/admin/activity/ombre-test`、`/admin/activity/forum-test`、`/admin/activity/games-test`、`/admin/activity/notion-test`、`/admin/activity/galatea-test` 和 `/admin/activity/botling-knows-test`。看到 `"ok":true` 代表 Render 已经能直连对应 MCP，而且找到了所需工具。AISay 测试入口只调用无副作用的 `cli({command:"help"})` 并返回指令指南；可用 `/admin/activity/forum-test?path=bookstore.read` 等路径继续查询领域或完整命令。游戏测试默认只调用 `list_games`；传入 `/admin/activity/games-test?game=fishing` 时还会只读调用该游戏的 `get_guide`；再加 `&inspect=help` 会固定调用只读的 `play(game, action="help", params={})`。Notion 测试入口只读取页面并返回识别到的题目、待答题与下一个题号。Galatea 测试入口只初始化 MCP 并核对 `get_self`、`list_threads`、`get_thread`、`list_activity`、`create_thread`、`create_reply` 六项契约，不会真的调用写工具。Botling Knows 测试入口默认只初始化 MCP 并读取工具契约；加 `?help=browse`、`?help=search`、`?help=ask`、`?help=answer` 或 `?help=comment` 会仅读取相应行为指南，不会执行该行为。确认结果正确后再把对应动作加入 `AUTONOMY_ACTIONS`。这些入口不会开局、游玩、修改账号、写入 Notion 或调用模型。所有已触发的自主活动，包括成功、失败、重复跳过和模型选择不行动，都会写入加密 Archive；成功行动也会进入 Gateway 私有时间线，让 AI 在下一次聊天时知道自己做过什么。
 

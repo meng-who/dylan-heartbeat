@@ -4,8 +4,7 @@ const { authorized, handleXMcP } = require("../x_mcp");
 
 const env = {
   X_API_KEY: "app-key", X_API_SECRET: "app-secret",
-  X_ACCESS_TOKEN: "user-token", X_ACCESS_TOKEN_SECRET: "user-secret",
-  GEMINI_API_KEY: "gemini-key"
+  X_ACCESS_TOKEN: "user-token", X_ACCESS_TOKEN_SECRET: "user-secret"
 };
 
 test("X MCP requires its own bearer token", () => {

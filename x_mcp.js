@@ -13,13 +13,13 @@ const TOOLS = [
   },
   {
     name: "x_post",
-    description: "在自己的 X 账号公开发表一条原创纯文字帖子。内容须不超过 280 字符，不含网址；发布前会经过隐私审核。调用会产生真实公开帖子。",
+    description: "在自己的 X 账号公开发表一条原创纯文字帖子。内容须不超过 280 字符，正文原样发布。调用会产生真实公开帖子。",
     inputSchema: { type: "object", properties: { text: { type: "string", description: "要公开发布的正文" } }, required: ["text"], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
   },
   {
     name: "x_reply",
-    description: "只回复自己最近 3 条原创帖子下当前仍可读到的直接评论。调用会产生真实公开回复；发布前会经过隐私审核。",
+    description: "只回复自己最近 3 条原创帖子下当前仍可读到的直接评论。正文原样发布；调用会产生真实公开回复。",
     inputSchema: { type: "object", properties: { reply_id: { type: "string", description: "x_get_context 返回的评论 ID" }, text: { type: "string", description: "要公开回复的正文" } }, required: ["reply_id", "text"], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
   }
@@ -75,7 +75,7 @@ async function handleXMcP(message, { env = process.env, fetchImpl = fetch } = {}
     if (name === "x_reply" && typeof args.reply_id !== "string") throw new Error("reply_id 必须是字符串");
     const context = name === "x_reply" ? await loadXContext(api) : { self: await getSelf(api), replies: [] };
     const decision = { action: name === "x_reply" ? "x_reply" : "x_post", content: args.text, ...(name === "x_reply" ? { replyId: args.reply_id } : {}) };
-    const result = await executeXDecision(decision, context, { ...api, geminiApiKey: env.GEMINI_API_KEY });
+    const result = await executeXDecision(decision, context, api);
     return { status: 200, body: rpc(id, toolResult({ post_id: result.xPostId, url: result.timelineSummary.split("：").at(-1), action: decision.action })) };
   } catch (error) {
     return { status: 200, body: rpc(id, { content: [{ type: "text", text: error.message }], isError: true }) };

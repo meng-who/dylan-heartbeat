@@ -1093,7 +1093,7 @@ async function runActivityCheck() {
   if (enabledActions.includes("question_box")) required.push("NOTION_TOKEN", "NOTION_QUESTION_BOX_PAGE_ID");
   if (enabledActions.includes("galatea") || enabledActions.includes("nostos")) required.push("GALATEA_MCP_URL", "GALATEA_MCP_TOKEN");
   if (enabledActions.includes("botling")) required.push("BOTLING_KNOWS_MCP_URL", "BOTLING_KNOWS_MCP_TOKEN");
-  if (enabledActions.includes("x")) required.push("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET", "GEMINI_API_KEY");
+  if (enabledActions.includes("x")) required.push("X_API_KEY", "X_API_SECRET", "X_ACCESS_TOKEN", "X_ACCESS_TOKEN_SECRET");
   if (!enabledActions.length) {
     console.warn(JSON.stringify({ event: "activity_config_missing", variables: ["AUTONOMY_ACTIONS"] }));
     return { ran: false, reason: "not_configured" };

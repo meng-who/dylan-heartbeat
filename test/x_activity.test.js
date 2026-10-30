@@ -30,14 +30,18 @@ test("reply must target a comment read in this cycle", () => {
   assert.throws(() => validateXDecision({ action: "x_reply", replyId: "999", content: "你好" }, { replies: [{ id: "123" }] }), /本轮/);
 });
 
-test("failed privacy review never calls the X write endpoint", async () => {
-  let called = false;
-  const fetchImpl = async url => {
-    if (String(url).includes("api.x.com")) called = true;
-    return { ok: true, json: async () => ({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({ decision: "block", text: "" }) }] } }] }) };
+test("X publishes the AI's wording unchanged, including she", async () => {
+  const original = "I thought of her today. She makes me smile.";
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    calls.push({ url: String(url), body: JSON.parse(init.body) });
+    return response({ id: "456" });
   };
-  await assert.rejects(() => executeXDecision({ action: "x_post", content: "一条公开想法" }, { self: { username: "cy" }, replies: [] }, { env, fetchImpl, geminiApiKey: "key" }), /未通过/);
-  assert.equal(called, false);
+  const result = await executeXDecision({ action: "x_post", content: original }, { self: { username: "cy" }, replies: [] }, { env, fetchImpl });
+  assert.equal(result.xPostId, "456");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, "https://api.x.com/2/tweets");
+  assert.equal(calls[0].body.text, original);
 });
 
 test("post sends reply target in official API body", async () => {
