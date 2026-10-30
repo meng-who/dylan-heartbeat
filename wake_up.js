@@ -1233,6 +1233,7 @@ async function runActivityCheck() {
       galateaUrl: process.env.GALATEA_MCP_URL,
       galateaToken: process.env.GALATEA_MCP_TOKEN,
       galateaTimeoutMs: readPositiveTimeout("GALATEA_MCP_TIMEOUT_MS", 20_000),
+      geminiApiKey: process.env.GEMINI_API_KEY,
       botlingUrl: process.env.BOTLING_KNOWS_MCP_URL,
       botlingToken: process.env.BOTLING_KNOWS_MCP_TOKEN,
       botlingTimeoutMs: readPositiveTimeout("BOTLING_KNOWS_MCP_TIMEOUT_MS", 20_000),
@@ -1264,6 +1265,7 @@ async function runActivityCheck() {
       gameName: error.gameName || "",
       gameSteps: error.gameSteps || [],
       galateaSteps: error.galateaSteps || [],
+      privacyReviewRequests: error.privacyReviewRequests || 0,
       nostosSteps: error.nostosSteps || []
     };
   }
@@ -1327,6 +1329,7 @@ async function runActivityCheck() {
     game_outcome: result.gameOutcome || "",
     galatea_steps: Array.isArray(result.galateaSteps) ? result.galateaSteps : [],
     galatea_outcome: result.galateaOutcome || "",
+    galatea_review: result.decision?.galateaReview || [],
     botling_steps: Array.isArray(result.botlingSteps) ? result.botlingSteps : [],
     botling_outcome: result.botlingOutcome || "",
     botling_question_id: result.decision?.botlingQuestionId || 0,
@@ -1338,6 +1341,7 @@ async function runActivityCheck() {
     failure_kind: result.failureKind || "",
     model_request_count: modelRequestCount,
     model_response_count: modelResponseCount,
+    privacy_review_request_count: result.privacyReviewRequests || 0,
     daily_slot_charged: budgetCharged,
     daily_slots_used: nextState.count,
     daily_slots_limit: maxPerDay,

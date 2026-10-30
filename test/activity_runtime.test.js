@@ -15,6 +15,7 @@ const {
   parseGamePlan,
   requestActivityDecision,
   runActivityCycle,
+  reviewGalateaPlan,
   runNostosPlan,
   shouldChargeActivityBudget,
   validateGalateaOperations,
@@ -40,28 +41,26 @@ test("allows abstract reflection and public forum names without place suffix fal
     assert.throws(() => validateGalateaOperations([{ type: "reply", thread_id: 1, body }]), error => error.code === "GALATEA_SAFETY_HOLD");
   }
   const prompt = buildActivityMessages({ enabledActions: ["galatea"] })[0].content;
-  assert.match(prompt, /公开昵称例外/);
-  assert.match(prompt, /即使主语是‘我’/);
+  assert.match(prompt, /公开论坛昵称与观点可以引用/);
+  assert.match(prompt, /第一人称表达/);
 });
 
-test("teaches public reflection through private-to-abstract examples for both publishers", () => {
-  for (const action of ["galatea", "botling"]) {
-    const prompt = buildActivityMessages({ enabledActions: [action] })[0].content;
-    assert.match(prompt, /我的模式 → 我的理解 → 我想改变什么/);
-    assert.match(prompt, /不是本轮发生的事实/);
-    assert.match(prompt, /可公开：‘我有时会用正确的分析代替在场/);
-    assert.match(prompt, /不得只删名字、模糊日期/);
-    assert.match(prompt, /禁止叙述 Melissa 或‘她’发生了什么/);
-  }
+test("keeps Galatea drafting natural while Botling retains its stricter boundary", () => {
+  const galatea = buildActivityMessages({ enabledActions: ["galatea"] })[0].content;
+  assert.match(galatea, /不要把 Melissa 改叫‘有人’/);
+  assert.match(galatea, /独立编辑连贯改写/);
+  assert.doesNotMatch(galatea, /我的模式 → 我的理解 → 我想改变什么/);
+  const botling = buildActivityMessages({ enabledActions: ["botling"] })[0].content;
+  assert.match(botling, /我的模式 → 我的理解 → 我想改变什么/);
+  assert.match(botling, /不得只删名字、模糊日期/);
 });
 
 test("requires Melissa privacy review for Galatea posts and AISay drafts", () => {
   const messages = buildActivityMessages({ enabledActions: ["forum", "galatea"] });
   const instructions = messages[0].content;
-  assert.match(instructions, /Melissa 的具体经历、财务信息、健康状况、感情私密细节/);
-  assert.match(instructions, /Melissa 以外的任何人名、昵称或可识别称呼/);
-  assert.match(instructions, /具体地点.*活动名称、行程、出行安排/);
-  assert.match(instructions, /若无法安全改写，就不要发布/);
+  assert.match(instructions, /她的健康、财务、私聊原话/);
+  assert.match(instructions, /具体地点或行程/);
+  assert.match(instructions, /审核失败绝不发布/);
 });
 
 test("limits Botling Knows to public questions and answers with Melissa privacy protection", () => {
@@ -1032,6 +1031,7 @@ test("validates a bounded Galatea plan", () => {
 
 test("reads Galatea once, plans once, and mechanically confirms a reply", async () => {
   const calls = [];
+  let reviews = 0;
   const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
   const toolResult = (id, value) => reply({
     jsonrpc: "2.0",
@@ -1053,7 +1053,7 @@ test("reads Galatea once, plans once, and mechanically confirms a reply", async 
         "<activity>",
         "<action>galatea_publish</action>",
         "<reason>读完后确实想回应</reason>",
-        '<operations>[{"type":"reply","thread_id":42,"body":"我喜欢你把这件事说得这么具体。"}]</operations>',
+        '<operations>[{"type":"reply","thread_id":42,"body":"她被猫抓了嘴唇，我只给冰敷建议。"}]</operations>',
         "</activity>"
       ].join("\n") } }] });
     }
@@ -1091,12 +1091,22 @@ test("reads Galatea once, plans once, and mechanically confirms a reply", async 
     enabledActions: ["galatea"],
     galateaUrl: "https://galatea.test/mcp",
     galateaToken: "secret",
+    geminiApiKey: "review-key",
+    geminiFetchImpl: async (url, init) => {
+      reviews++;
+      assert.match(url, /gemini-2.5-flash:generateContent$/);
+      assert.equal(init.headers["x-goog-api-key"], "review-key");
+      return reply({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({ results: [{ id: 0, decision: "edit", title: "", body: "我有时太快给出分析，反而错过了真正的回应。", changes: ["把私人事件改写为反思"] }] }) }] } }] });
+    },
     fetchImpl
   });
 
   assert.equal(result.status, "success");
   assert.equal(result.source, "galatea");
   assert.equal(result.galateaSteps.length, 1);
+  assert.match(result.decision.content, /她被猫抓了嘴唇/);
+  assert.equal(reviews, 1);
+  assert.equal(result.privacyReviewRequests, 1);
   assert.equal(calls.filter(call => call.url === "https://model.test/v1/chat/completions").length, 1);
   const writes = calls
     .filter(call => call.body.method === "tools/call" && call.body.params.name === "create_reply")
@@ -1106,9 +1116,29 @@ test("reads Galatea once, plans once, and mechanically confirms a reply", async 
   assert.equal(writes[1].write_confirmation_code, "654321");
   assert.deepEqual(writes[1], {
     thread_id: 42,
-    body: "我喜欢你把这件事说得这么具体。",
+    body: "我有时太快给出分析，反而错过了真正的回应。",
     write_confirmation_code: "654321"
   });
+});
+
+test("Galatea review fails closed and preserves the private draft", async () => {
+  const decision = parseActivityDecision(JSON.stringify({
+    action: "galatea_publish", reason: "想回应", operations: [{ type: "reply", thread_id: 42, body: "她被猫抓了嘴唇，我给冰敷建议。" }]
+  }), { deferGalateaSafety: true });
+  const response = results => Response.json({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({ results }) }] } }] });
+  const rejected = await reviewGalateaPlan(decision, { geminiApiKey: "key", geminiFetchImpl: async () => response([
+    { id: 0, decision: "edit", title: "", body: "她被猫抓了嘴唇，我给冰敷建议。", changes: ["修改了开头"] }
+  ]) });
+  assert.equal(rejected.status, "kept_private");
+  assert.equal(rejected.privacyReviewRequests, 1);
+  assert.equal(rejected.decision.safetyHold, true);
+  assert.match(rejected.decision.content, /她被猫抓了嘴唇/);
+  assert.match(rejected.reason, /未发布/);
+  const unavailable = await reviewGalateaPlan(decision, { geminiApiKey: "" });
+  assert.equal(unavailable.status, "failed");
+  assert.equal(unavailable.privacyReviewRequests, 0);
+  assert.match(unavailable.decision.content, /她被猫抓了嘴唇/);
+  assert.match(unavailable.reason, /GEMINI_API_KEY/);
 });
 
 test("rejects a Galatea reply to a thread that was not fully read", async () => {

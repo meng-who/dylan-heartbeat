@@ -1564,6 +1564,9 @@ function archivePageHtml() {
         if (Number.isFinite(Number(item.model_response_count))) {
           details.push("成功响应：" + Math.max(0, Number(item.model_response_count)) + " 次");
         }
+        if (Number(item.privacy_review_request_count) > 0) {
+          details.push("Gemini 隐私编辑请求：" + item.privacy_review_request_count + " 次（可能产生额外费用）");
+        }
         const hasSlotSnapshot = Number.isFinite(Number(item.daily_slots_used))
           && Number.isFinite(Number(item.daily_slots_limit))
           && Number.isFinite(Number(item.daily_slots_remaining));
@@ -1598,6 +1601,16 @@ function archivePageHtml() {
         ].filter(Boolean).join("\\n")).join("\\n\\n");
         galateaSteps.append(node("div", "narrative-body", stepText));
         article.append(galateaSteps);
+      }
+      if (item.kind === "activity" && Array.isArray(item.galatea_review) && item.galatea_review.length) {
+        const review = node("details", "narrative");
+        review.append(node("summary", "", "查看花园隐私编辑（" + item.galatea_review.length + " 项）"));
+        review.append(node("div", "narrative-body", item.galatea_review.map(entry => [
+          "第 " + (entry.id + 1) + " 项：" + entry.decision,
+          entry.changes?.length ? "修改：" + entry.changes.join("；") : "",
+          entry.operation ? "审核后正文：" + entry.operation.body : "未生成可发布正文"
+        ].filter(Boolean).join("\\n")).join("\\n\\n")));
+        article.append(review);
       }
       if (item.kind === "activity" && Array.isArray(item.botling_steps) && item.botling_steps.length) {
         const botlingSteps = node("details", "narrative");
