@@ -39,6 +39,7 @@ const {
 const { RemoteMcpClient } = require("./remote_mcp_client");
 const { NotionQuestionBox } = require("./notion_question_box");
 const { authorizeAdmin, buildAdminSessionCookie } = require("./admin_auth");
+const { previewPrivacy, privacyPreviewHtml } = require("./privacy_preview");
 
 const DEFAULT_BODY_LIMIT_MB = 50;
 
@@ -1848,6 +1849,28 @@ app.get("/admin/activity/forum-test", { preHandler: basicAuth }, async (req, rep
 });
 
 // Read-only connection check: it initializes Galatea MCP and lists tool contracts without calling a forum tool.
+app.get("/admin/activity/privacy-test", { preHandler: basicAuth }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  return reply.type("text/html; charset=utf-8").send(privacyPreviewHtml());
+});
+
+app.post("/admin/activity/privacy-test", { preHandler: basicAuth, bodyLimit: 40000 }, async (req, reply) => {
+  setArchivePrivacyHeaders(reply);
+  if (req.headers.origin) {
+    try {
+      const origin = new URL(req.headers.origin);
+      if (!["http:", "https:"].includes(origin.protocol) || origin.host !== req.headers.host) throw new Error("cross origin");
+    } catch {
+      return reply.code(403).send({ ok: false, error: "不允许跨站提交" });
+    }
+  }
+  try {
+    return await previewPrivacy({ operations: req.body?.operations, apiKey: process.env.GEMINI_API_KEY });
+  } catch (error) {
+    return reply.code(400).send({ ok: false, error: error.message });
+  }
+});
+
 app.get("/admin/activity/galatea-test", { preHandler: basicAuth }, async (req, reply) => {
   setArchivePrivacyHeaders(reply);
   if (!process.env.GALATEA_MCP_URL || !process.env.GALATEA_MCP_TOKEN) {
