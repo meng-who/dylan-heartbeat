@@ -1216,6 +1216,7 @@ async function runActivityCheck() {
       xEnv: process.env,
       xSeenReplies: Array.isArray(nextState.x_seen_replies) ? nextState.x_seen_replies : [],
       xPostsToday: nextState.x_date === gate.date ? nextState.x_posts_today || 0 : 0,
+      xPostLimit: Math.floor(readNumberEnv("X_MAX_POSTS_PER_DAY", 3, { min: 1, max: 24 })),
       xRepliesToday: nextState.x_date === gate.date ? nextState.x_replies_today || 0 : 0,
       forceGame: process.env.AUTONOMY_TEST_FORCE_GAME,
       playlistName: process.env.SPOTIFY_PLAYLIST_NAME || "自主收藏",

@@ -1443,6 +1443,7 @@ async function requestActivityDecision(options, messages) {
 
 async function runActivityCycle(options) {
   const enabledActions = parseEnabledActions(options.enabledActions);
+  const xPostLimit = Number.isInteger(options.xPostLimit) && options.xPostLimit >= 1 ? options.xPostLimit : 3;
   const forceGame = String(options.forceGame || "").trim().toLowerCase();
   if (forceGame && !AUTONOMOUS_GAMES.has(forceGame)) {
     throw new Error("AUTONOMY_TEST_FORCE_GAME 只能填写 fishing 或 garden_cat");
@@ -1594,7 +1595,7 @@ async function runActivityCycle(options) {
           nostosContext: nostos?.context,
           botlingContext: botling?.context,
           xContext: x ? `@${x.self.username}\n自己的近期帖子：${JSON.stringify(x.posts)}\n未回复评论：${JSON.stringify(x.replies)}` : "",
-          xCanPost: (options.xPostsToday || 0) < 1,
+          xCanPost: (options.xPostsToday || 0) < xPostLimit,
           xCanReply: (options.xRepliesToday || 0) < 3
         })
       );
@@ -1605,7 +1606,7 @@ async function runActivityCycle(options) {
   try {
     if (["x_post", "x_reply"].includes(decision.action)) {
       if (!availableActions.includes("x") || !x) throw new Error("X Activity 未启用");
-      if (decision.action === "x_post" && (options.xPostsToday || 0) >= 1) throw new Error("X 今日原创发帖已达 1 条上限");
+      if (decision.action === "x_post" && (options.xPostsToday || 0) >= xPostLimit) throw new Error(`X 今日原创发帖已达 ${xPostLimit} 条上限`);
       if (decision.action === "x_reply" && (options.xRepliesToday || 0) >= 3) throw new Error("X 今日回复已达 3 条上限");
       return await executeXDecision(decision, x, { env: options.xEnv, fetchImpl: options.fetchImpl || fetch });
     }

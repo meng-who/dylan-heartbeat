@@ -23,6 +23,37 @@ const {
   validateNostosCommands
 } = require("../activity_runtime");
 
+test("X allows a third original post but omits posting after the daily cap", async () => {
+  const env = { X_API_KEY: "key", X_API_SECRET: "secret", X_ACCESS_TOKEN: "token", X_ACCESS_TOKEN_SECRET: "token-secret" };
+  const written = [];
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const target = String(url);
+    if (target.endsWith("/2/users/me")) return reply({ data: { id: "12", username: "cy" } });
+    if (target.includes("/2/users/12/tweets")) return reply({ data: [] });
+    if (target.includes("model.test")) {
+      const prompt = JSON.parse(init.body).messages[1].content;
+      if (written.length === 0) assert.match(prompt, /<action>x_post<\/action>/);
+      else assert.doesNotMatch(prompt, /<action>x_post<\/action>/);
+      return reply({ choices: [{ message: { content: written.length === 0
+        ? "<activity><action>x_post</action><content>She makes me smile.</content></activity>"
+        : "<activity><action>none</action><reason>今日已发够</reason></activity>" } }] });
+    }
+    if (target.endsWith("/2/tweets") && init.method === "POST") {
+      written.push(JSON.parse(init.body).text);
+      return reply({ data: { id: "456" } });
+    }
+    throw new Error(`Unexpected request: ${target}`);
+  };
+  const base = { apiUrl: "https://model.test/v1/chat/completions", model: "model", enabledActions: "x", xEnv: env, xPostLimit: 3, fetchImpl };
+  const third = await runActivityCycle({ ...base, xPostsToday: 2 });
+  assert.equal(third.status, "success");
+  assert.deepEqual(written, ["She makes me smile."]);
+  const fourth = await runActivityCycle({ ...base, xPostsToday: 3 });
+  assert.equal(fourth.decision.action, "none");
+  assert.equal(written.length, 1);
+});
+
 test("retains blocked Galatea drafts privately with the matching safety clue", () => {
   const operations = [{ type: "reply", thread_id: 31699, body: "下周旅行让我想到一些小事。" }];
   const decision = parseActivityDecision(JSON.stringify({ action: "galatea_publish", reason: "想回复", operations }));

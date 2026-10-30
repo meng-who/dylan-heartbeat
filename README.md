@@ -467,7 +467,7 @@ Activity 使用独立计时器，不受 `DAY_CHECK_INTERVAL_MINUTES`、`NIGHT_CH
 
 ### X 发帖与 Kelivo 聊天工具
 
-在 Render 配置 `X_API_KEY`、`X_API_SECRET`、`X_ACCESS_TOKEN`、`X_ACCESS_TOKEN_SECRET`。先打开 `/admin/activity/x-test`，确认只读连接返回 `"ok":true` 和预期用户名。想让自动唤醒自主发帖、回复自己帖子下的新评论，再把 `x` 加入现有 `AUTONOMY_ACTIONS`，不要覆盖其他已启用动作。每天最多原创 1 条、回复 3 条；没有合适内容时可以不发。X 正文按 AI 写出的内容直接发布，不经过隐私编辑或改写。
+在 Render 配置 `X_API_KEY`、`X_API_SECRET`、`X_ACCESS_TOKEN`、`X_ACCESS_TOKEN_SECRET`。先打开 `/admin/activity/x-test`，确认只读连接返回 `"ok":true` 和预期用户名。想让自动唤醒自主发帖、回复自己帖子下的新评论，再把 `x` 加入现有 `AUTONOMY_ACTIONS`，不要覆盖其他已启用动作。每天最多原创 3 条、回复 3 条；没有合适内容时可以不发。`X_MAX_POSTS_PER_DAY` 可在 Render 单独调整原创上限，默认 3。实际活动次数仍受 `AUTONOMY_MAX_ACTIONS_PER_DAY` 限制。X 正文按 AI 写出的内容直接发布，不经过隐私编辑或改写。
 
 想在 Kelivo 聊天里调用 X，还需在 Render 新增独立随机密钥 `X_MCP_TOKEN`。Kelivo「设置 → MCP」添加 Streamable HTTP 服务器，地址填 `https://你的Render域名/mcp/x`，请求头填 `Authorization: Bearer 你的X_MCP_TOKEN`。启用 `x_get_context`、`x_post`、`x_reply`；建议把两个写工具设为每次询问。X API 凭证只留在 Render，不填入 Kelivo。MCP 写工具原样发布正文；回复目标必须是自己近期帖子下当前可读的直接评论。
 
