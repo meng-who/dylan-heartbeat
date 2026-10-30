@@ -13,6 +13,8 @@ test("privacy preview uses one non-thinking request and only replaces text", asy
     assert.match(url, /gemini-2.5-flash:generateContent$/);
     const body = JSON.parse(init.body);
     assert.deepEqual(body.generationConfig.thinkingConfig, { thinkingBudget: 0, includeThoughts: false });
+    assert.equal(body.generationConfig.responseSchema.properties.results.minItems, 1);
+    assert.equal(body.generationConfig.responseSchema.properties.results.maxItems, 1);
     assert.equal(init.headers["x-goog-api-key"], "secret");
     assert.deepEqual(JSON.parse(body.contents[0].parts[0].text), [{ id: 0, title: "", body: operation.body }]);
     return response([{ id: 0, decision: "edit", title: "", body: "我有时先分析。后来我停下了。", changes: ["删除具体健康信息"] }]);
@@ -26,7 +28,7 @@ test("privacy preview uses one non-thinking request and only replaces text", asy
 
 test("privacy preview fails closed on malformed or incomplete responses", async () => {
   for (const fetchImpl of [async () => response([]), async () => Response.json({ candidates: [{ finishReason: "MAX_TOKENS" }] }), async () => response([{ id: 1, decision: "pass", body: "x", title: "", changes: [] }]), async () => new Response("unavailable", { status: 503 })]) {
-    await assert.rejects(() => previewPrivacy({ operations: [operation], apiKey: "key", fetchImpl }));
+    await assert.rejects(() => previewPrivacy({ operations: [operation], apiKey: "key", fetchImpl, sleep: async () => {} }));
   }
 });
 
@@ -49,4 +51,22 @@ test("privacy preview page script parses and renders output as text", () => {
   new Script(html.match(/<script>([\s\S]*?)<\/script>/)[1]);
   assert.match(html, /pre.textContent/);
   assert.doesNotMatch(html, /innerHTML/);
+});
+
+test("503 retries are bounded and a successful response is not regenerated", async () => {
+  let calls = 0;
+  const delays = [];
+  const result = await previewPrivacy({ operations: [operation], apiKey: "key", sleep: async ms => delays.push(ms), fetchImpl: async () => {
+    calls++;
+    return calls < 3 ? new Response("overloaded", { status: 503 }) : response([{ id: 0, decision: "pass", title: "", body: operation.body, changes: [] }]);
+  } });
+  assert.equal(calls, 3);
+  assert.equal(result.request_attempts, 3);
+  assert.deepEqual(delays, [1500, 3000]);
+});
+
+test("format mismatches report expected and actual counts without retry", async () => {
+  let calls = 0;
+  await assert.rejects(() => previewPrivacy({ operations: [operation], apiKey: "key", fetchImpl: async () => { calls++; return response([]); } }), /预期 1 条，实际 0/);
+  assert.equal(calls, 1);
 });
