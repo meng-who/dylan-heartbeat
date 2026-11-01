@@ -6,6 +6,7 @@ const path = require("path");
 const test = require("node:test");
 
 const {
+  activityCategory,
   appendWakeArchive,
   buildWakeArchiveOutcome,
   collectReadingHistory,
@@ -16,6 +17,35 @@ const {
   readReadingHistory,
   readWakeArchive
 } = require("../wake_archive");
+
+test("classifies old and new autonomous activity records", () => {
+  const record = fields => ({ kind: "activity", ...fields });
+  assert.equal(activityCategory(record({ action: "ombre_letter_write", source: "ombre" })), "ombre_letter");
+  assert.equal(activityCategory(record({ action: "ombre_i_write", source: "ombre" })), "ombre_self");
+  assert.equal(activityCategory(record({ action: "games_play", game_name: "fishing" })), "fishing");
+  assert.equal(activityCategory(record({ source: "games", game_name: "garden_cat" })), "garden_cat");
+  assert.equal(activityCategory(record({ action: "question_box_ask", source: "notion" })), "question_box");
+  assert.equal(activityCategory(record({ action: "none", source: "galatea" })), "galatea");
+  assert.equal(activityCategory(record({ action: "model_decision", source: "model" })), "other");
+  assert.equal(activityCategory({ kind: "solo", action: "games_play" }), "");
+});
+
+test("filters activity before applying the record limit", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "archive-activity-"));
+  const filePath = path.join(directory, "archive.enc.jsonl");
+  const key = crypto.randomBytes(32);
+  try {
+    appendWakeArchive({ id: "garden", kind: "activity", source: "games", game_name: "garden_cat", status: "success" }, { key, filePath });
+    appendWakeArchive({ id: "fish", kind: "activity", source: "games", game_name: "fishing", status: "success" }, { key, filePath });
+    appendWakeArchive({ id: "wake", kind: "wake", status: "sent" }, { key, filePath });
+    const result = readWakeArchive({ key, filePath, kind: "activity", activity: "garden_cat", limit: 1 });
+    assert.deepEqual(result.records.map(item => item.id), ["garden"]);
+    assert.equal(result.records[0].activity_category, "garden_cat");
+    assert.equal(readWakeArchive({ key, filePath, activity: "fishing" }).records[0].id, "fish");
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
 
 test("encrypts archive records without leaving plaintext on disk", () => {
   const key = crypto.randomBytes(32);

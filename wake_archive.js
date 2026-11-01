@@ -108,6 +108,26 @@ function readArchiveLines(filePath) {
   return fs.readFileSync(filePath, "utf8").split(/\r?\n/).filter(Boolean);
 }
 
+function activityCategory(record) {
+  if (record.kind !== "activity") return "";
+  const action = String(record.action || "");
+  const source = String(record.source || "");
+  if (action === "ombre_letter_write") return "ombre_letter";
+  if (action === "ombre_i_write") return "ombre_self";
+  if (action === "games_play" || source === "games") {
+    return ["fishing", "garden_cat"].includes(record.game_name) ? record.game_name : "games_other";
+  }
+  if (action === "spotify_add" || source === "spotify") return "spotify";
+  if (action === "forum_lurk" || source === "forum") return "forum";
+  if (action === "book_reflect" || source === "books") return "books";
+  if (action.startsWith("question_box_") || source === "notion") return "question_box";
+  if (action === "galatea_publish" || source === "galatea") return "galatea";
+  if (action === "nostos_play" || source === "nostos") return "nostos";
+  if (action.startsWith("botling_") || source === "botling") return "botling";
+  if (action.startsWith("x_") || source === "x") return "x";
+  return "other";
+}
+
 function readWakeArchive(options = {}) {
   const key = options.key || parseArchiveKey((options.env || process.env).WAKE_ARCHIVE_KEY);
   if (!key) throw new Error("WAKE_ARCHIVE_KEY 无效或未配置");
@@ -115,6 +135,7 @@ function readWakeArchive(options = {}) {
   const query = String(options.query || "").trim().toLowerCase();
   const status = String(options.status || "").trim();
   const kind = String(options.kind || "").trim();
+  const activity = String(options.activity || "").trim();
   const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 500);
   let unreadable = 0;
 
@@ -128,6 +149,7 @@ function readWakeArchive(options = {}) {
   }).filter(Boolean).reverse().filter(record => {
     if (status && record.status !== status) return false;
     if (kind && (record.kind || "wake") !== kind) return false;
+    if (activity && activityCategory(record) !== activity) return false;
     if (!query) return true;
     return [
       record.kind,
@@ -156,7 +178,9 @@ function readWakeArchive(options = {}) {
       record.nostos_outcome,
       JSON.stringify(record.nostos_steps || [])
     ].some(value => String(value || "").toLowerCase().includes(query));
-  }).slice(0, limit);
+  }).slice(0, limit).map(record => record.kind === "activity"
+    ? { ...record, activity_category: activityCategory(record) }
+    : record);
 
   return { records, unreadable, configured: true };
 }
@@ -264,6 +288,7 @@ function deleteWakeArchiveRecord(id, options = {}) {
 
 module.exports = {
   DEFAULT_ARCHIVE_PATH,
+  activityCategory,
   appendWakeArchive,
   archiveConfigured,
   archiveFilePath,

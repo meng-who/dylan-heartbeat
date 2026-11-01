@@ -1333,7 +1333,9 @@ function archivePageHtml() {
     .actions { display: flex; gap: 8px; flex-shrink: 0; }
     .button, button { min-height: 38px; border: 1px solid #d9c4cb; border-radius: 6px; padding: 8px 12px; color: #70404e; background: #fff; font: inherit; font-size: 14px; cursor: pointer; text-decoration: none; }
     .button:hover, button:hover { border-color: #a96c7d; }
-    .toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) 140px 180px auto; gap: 10px; padding: 16px 0; border-top: 1px solid #eadde1; border-bottom: 1px solid #eadde1; }
+    .toolbar { display: grid; grid-template-columns: minmax(180px, 1fr) repeat(2, minmax(130px, 170px)) auto; gap: 10px; padding: 16px 0; border-top: 1px solid #eadde1; border-bottom: 1px solid #eadde1; }
+    .toolbar.with-activity { grid-template-columns: minmax(180px, 1fr) repeat(3, minmax(130px, 170px)) auto; }
+    [hidden] { display: none !important; }
     input, select { width: 100%; min-height: 40px; border: 1px solid #d9cbd0; border-radius: 6px; padding: 8px 10px; color: #352e31; background: #fff; font: inherit; }
     input:focus, select:focus { outline: 2px solid #e8cbd4; border-color: #a96c7d; }
     #summary { min-height: 24px; margin: 16px 0 8px; color: #776b70; font-size: 13px; }
@@ -1360,7 +1362,7 @@ function archivePageHtml() {
       main { width: min(100% - 24px, 920px); margin-top: 22px; }
       header { display: block; }
       .actions { margin-top: 16px; }
-      .toolbar { grid-template-columns: 1fr; }
+      .toolbar, .toolbar.with-activity { grid-template-columns: 1fr; }
       .model { width: 100%; margin-left: 0; }
     }
   </style>
@@ -1385,6 +1387,23 @@ function archivePageHtml() {
         <option value="solo">Solo</option>
         <option value="activity">自主活动</option>
         <option value="dream">梦境</option>
+      </select>
+      <select id="activity" aria-label="筛选自主活动" hidden disabled>
+        <option value="">全部自主活动</option>
+        <option value="spotify">Spotify</option>
+        <option value="ombre_letter">Ombre 写信</option>
+        <option value="ombre_self">Ombre 自我认知</option>
+        <option value="forum">AISay 潜水</option>
+        <option value="books">AISay 读书</option>
+        <option value="fishing">钓鱼</option>
+        <option value="garden_cat">花园与猫咪</option>
+        <option value="games_other">其他游戏</option>
+        <option value="question_box">提问箱</option>
+        <option value="galatea">花园论坛</option>
+        <option value="nostos">雾潮群岛</option>
+        <option value="botling">Botling Knows</option>
+        <option value="x">X</option>
+        <option value="other">其他／未确定</option>
       </select>
       <select id="status" aria-label="筛选结果">
         <option value="">全部结果</option>
@@ -1421,6 +1440,7 @@ function archivePageHtml() {
     };
     const query = document.getElementById("query");
     const kind = document.getElementById("kind");
+    const activity = document.getElementById("activity");
     const status = document.getElementById("status");
     const records = document.getElementById("records");
     const summary = document.getElementById("summary");
@@ -1450,6 +1470,7 @@ function archivePageHtml() {
       const params = new URLSearchParams({ limit: "200" });
       if (query.value.trim()) params.set("q", query.value.trim());
       if (kind.value) params.set("kind", kind.value);
+      if (kind.value === "activity" && activity.value) params.set("activity", activity.value);
       if (status.value) params.set("status", status.value);
       try {
         const response = await fetch("/admin/archive/data?" + params.toString(), { cache: "no-store" });
@@ -1472,6 +1493,8 @@ function archivePageHtml() {
       const head = node("div", "record-head");
       const kindLabels = { wake: "主动推送", solo: "Solo", activity: "自主活动", dream: "梦境" };
       head.append(node("span", "kind", kindLabels[item.kind || "wake"] || item.kind));
+      const activityLabels = { spotify: "Spotify", ombre_letter: "Ombre 写信", ombre_self: "Ombre 自我认知", forum: "AISay 潜水", books: "AISay 读书", fishing: "钓鱼", garden_cat: "花园与猫咪", games_other: "其他游戏", question_box: "提问箱", galatea: "花园论坛", nostos: "雾潮群岛", botling: "Botling Knows", x: "X", other: "其他／未确定" };
+      if (item.kind === "activity") head.append(node("span", "kind", activityLabels[item.activity_category] || "其他／未确定"));
       head.append(node("span", "status status-" + item.status, labels[item.status] || item.status));
       head.append(node("time", "", item.local_time || item.created_at || "未知时间"));
       head.append(node("span", "model", item.model || "未知模型"));
@@ -1647,7 +1670,14 @@ function archivePageHtml() {
       searchTimer = setTimeout(loadArchive, 250);
     });
     status.addEventListener("change", loadArchive);
-    kind.addEventListener("change", loadArchive);
+    kind.addEventListener("change", () => {
+      activity.hidden = kind.value !== "activity";
+      activity.disabled = activity.hidden;
+      activity.closest(".toolbar").classList.toggle("with-activity", !activity.hidden);
+      if (activity.hidden) activity.value = "";
+      loadArchive();
+    });
+    activity.addEventListener("change", loadArchive);
     document.getElementById("refresh").addEventListener("click", loadArchive);
     loadArchive();
   </script>
@@ -1677,6 +1707,7 @@ app.get("/admin/archive/data", { preHandler: basicAuth }, async (req, reply) => 
       query: req.query?.q,
       status: req.query?.status,
       kind: req.query?.kind,
+      activity: req.query?.activity,
       limit: req.query?.limit
     });
   } catch (error) {
