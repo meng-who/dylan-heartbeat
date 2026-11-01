@@ -252,6 +252,42 @@ test("missing dream summary falls back to fragments from the whole dream", () =>
   assert.doesNotMatch(parsed.summary, /…$/);
 });
 
+test("dream parser extracts fenced or lightly malformed JSON without exposing the wrapper", () => {
+  const raw = `结果如下：\n\`\`\`json\n{
+    "dream": "我走进一座漂在海上的旧车站，白色的鸟沿着轨道奔跑，翅膀发出细密的雨声。站台忽然折成一艘船，载着我穿过低低的云层。天亮时，船停在熟悉的窗前，我手里多了一张没有写字的车票。",
+    "summary": "我进入漂在海上的旧车站，随折叠成船的站台穿过云层，最后带着一张空白车票回到熟悉窗前。",
+  }\n\`\`\`\n请查收。`;
+  const parsed = parseDream(raw);
+  assert.match(parsed.dream, /^我走进一座/);
+  assert.doesNotMatch(parsed.dream, /[{}]|"dream"|```/);
+  assert.match(parsed.summary, /^我进入漂在海上/);
+});
+
+test("dream request retries malformed JSON instead of archiving it as prose", async () => {
+  let calls = 0;
+  const result = await requestDream({
+    apiKey: "test-key",
+    model: "gemini-2.5-flash",
+    provider: "gemini",
+    endpoint: "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+    messages: buildDreamMessages("一座旧车站", "用户：昨晚下雨了"),
+    fetchImpl: async (_url, options) => {
+      calls++;
+      if (calls === 2) assert.match(JSON.parse(options.body).messages.at(-1).content, /JSON 格式损坏/);
+      const content = calls === 1
+        ? '{"dream":[这不是字符串],"summary":"坏掉了"}'
+        : JSON.stringify({
+          dream: "我走进一座漂在海上的旧车站，白色的鸟沿轨道奔跑，翅膀发出雨声。站台忽然折成一艘船，载着我穿过云层。天亮时，船停在熟悉的窗前，我手里多了一张空白车票。",
+          summary: "我进入漂在海上的旧车站，随折叠成船的站台穿过云层，最后带着一张空白车票回到熟悉窗前。"
+        });
+      return { ok: true, headers: { get: () => "application/json" }, text: async () => JSON.stringify({ choices: [{ message: { content } }] }) };
+    }
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.attempts, 2);
+  assert.doesNotMatch(result.dream, /"dream"|\{\s*"/);
+});
+
 test("dream request retries only BigModel temporary overloads", async () => {
   let calls = 0;
   const delays = [];

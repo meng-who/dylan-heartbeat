@@ -102,17 +102,58 @@ async function readDreamMemory({ client, conversation = "", logger = console }) 
   return dreamMemoryMaterial(recalled);
 }
 
+function decodeJsonStringLiteral(literal) {
+  const escapedControls = String(literal).replace(/[\u0000-\u001f]/g, character => {
+    if (character === "\n") return "\\n";
+    if (character === "\r") return "\\r";
+    if (character === "\t") return "\\t";
+    return `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`;
+  });
+  return JSON.parse(escapedControls);
+}
+
+function parseDreamPayload(raw) {
+  const unfenced = String(raw || "")
+    .replace(/^\s*\`\`\`(?:json)?\s*/i, "")
+    .replace(/\s*\`\`\`\s*$/i, "")
+    .trim();
+  const objectStart = unfenced.indexOf("{");
+  const objectEnd = unfenced.lastIndexOf("}");
+  const objectSlice = objectStart >= 0 && objectEnd > objectStart
+    ? unfenced.slice(objectStart, objectEnd + 1)
+    : "";
+  const candidates = [...new Set([unfenced, objectSlice].filter(Boolean))];
+  for (const candidate of candidates) {
+    for (const variant of [candidate, candidate.replace(/,\s*([}\]])/g, "$1")]) {
+      try {
+        const parsed = JSON.parse(variant);
+        if (parsed && typeof parsed === "object") return parsed;
+      } catch {}
+    }
+  }
+
+  const dreamMatch = unfenced.match(/["']dream["']\s*:\s*("(?:\\.|[^"\\])*")/s);
+  const summaryMatch = unfenced.match(/["']summary["']\s*:\s*("(?:\\.|[^"\\])*")/s);
+  if (dreamMatch) {
+    try {
+      return {
+        dream: decodeJsonStringLiteral(dreamMatch[1]),
+        summary: summaryMatch ? decodeJsonStringLiteral(summaryMatch[1]) : ""
+      };
+    } catch {}
+  }
+  return null;
+}
+
 function parseDream(text) {
   const raw = String(text || "").trim();
-  let value;
-  try {
-    value = JSON.parse(raw.replace(/^\`\`\`(?:json)?\s*|\s*\`\`\`$/gi, ""));
-  } catch {
-    value = { dream: raw };
-  }
-  const dream = String(value?.dream || "").trim();
+  const value = parseDreamPayload(raw);
+  const looksLikeJson = /\`\`\`json|["']dream["']\s*:|^\s*\{/i.test(raw);
+  if (!value && looksLikeJson) throw new Error("梦境模型返回了无法解析的 JSON");
+  const resolved = value || { dream: raw };
+  const dream = String(resolved?.dream || "").trim();
   if (dream.length < 60 || dream.length > 3000) throw new Error("梦境正文长度不合适");
-  const suppliedSummary = String(value?.summary || "").replace(/\s+/g, " ").trim();
+  const suppliedSummary = String(resolved?.summary || "").replace(/\s+/g, " ").trim();
   const summary = suppliedSummary
     ? compactSummaryText(suppliedSummary)
     : fallbackDreamSummary(dream);
@@ -227,6 +268,7 @@ async function requestDream({
   let requestMessages = messages;
   let verbatimRetried = false;
   let summaryRetried = false;
+  let formatRetried = false;
   for (let attempt = 1; attempt <= attemptsLimit; attempt++) {
     let response;
     try {
@@ -273,7 +315,21 @@ async function requestDream({
       throw new Error(`梦境模型 HTTP ${response.status}${tried}: ${body.slice(0, 160)}`);
     }
     const parsed = parseChatCompletionResponse(body, response.headers?.get?.("content-type") || "");
-    const result = parseDream(parsed?.choices?.[0]?.message?.content);
+    let result;
+    try {
+      result = parseDream(parsed?.choices?.[0]?.message?.content);
+    } catch (error) {
+      const malformedJson = /无法解析的 JSON/.test(String(error?.message || error));
+      if (malformedJson && !formatRetried && attempt < attemptsLimit) {
+        formatRetried = true;
+        requestMessages = [...messages, {
+          role: "user",
+          content: "上一版输出的 JSON 格式损坏。请重新生成，并严格只输出一个可解析的 JSON 对象，必须包含正确转义的 dream 和 summary 两个字符串字段；不要使用 Markdown 代码块，不要添加前后说明。"
+        }];
+        continue;
+      }
+      throw error;
+    }
     if (hasVerbatimConversationOverlap(result.dream, forbiddenVerbatimText)) {
       if (!verbatimRetried && attempt < attemptsLimit) {
         verbatimRetried = true;
