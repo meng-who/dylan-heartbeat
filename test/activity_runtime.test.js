@@ -63,6 +63,17 @@ test("Ombre letters invite reflection without turning every activity into a diar
   assert.doesNotMatch(buildActivityMessages({ enabledActions: ["books"] })[0].content, /没能或没敢说出口/);
 });
 
+test("Question Box autonomy answers or asks but never writes afterwords", () => {
+  const available = buildActivityMessages({ enabledActions: ["question_box"] });
+  assert.match(available[0].content, /真正想问的新问题/);
+  assert.match(available[1].content, /<action>question_box_ask<\/action>/);
+  assert.doesNotMatch(available[1].content, /question_box_afterword/);
+  const pending = buildActivityMessages({ enabledActions: ["question_box"], questionBoxPending: true });
+  assert.match(pending[1].content, /<action>question_box_answer<\/action>/);
+  assert.doesNotMatch(pending[1].content, /question_box_afterword/);
+  assert.throws(() => parseActivityDecision(JSON.stringify({ action: "question_box_afterword", question_id: "Q-001", content: "再补一句" })), /不支持的动作/);
+});
+
 test("retains blocked Galatea drafts privately with the matching safety clue", () => {
   const operations = [{ type: "reply", thread_id: 31699, body: "下周旅行让我想到一些小事。" }];
   const decision = parseActivityDecision(JSON.stringify({ action: "galatea_publish", reason: "想回复", operations }));

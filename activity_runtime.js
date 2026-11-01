@@ -91,7 +91,6 @@ function normalizeActivityAction(value) {
     notion: "question_box_ask",
     question_box: "question_box_ask",
     question_answer: "question_box_answer",
-    question_afterword: "question_box_afterword",
     galatea: "galatea_publish",
     garden_forum: "galatea_publish",
     nostos: "nostos_play",
@@ -141,7 +140,7 @@ function parseActivityDecision(value, { deferGalateaSafety = false } = {}) {
   }
   let action = normalizeActivityAction(parsed.action || "none");
   if (action === "forum_send") action = "forum_lurk";
-  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_lurk", "book_reflect", "games_play", "question_box_answer", "question_box_ask", "question_box_afterword", "galatea_publish", "nostos_play", "botling_ask", "botling_answer", "x_post", "x_reply"].includes(action)) {
+  if (!["none", "spotify_add", "ombre_i_write", "ombre_letter_write", "forum_lurk", "book_reflect", "games_play", "question_box_answer", "question_box_ask", "galatea_publish", "nostos_play", "botling_ask", "botling_answer", "x_post", "x_reply"].includes(action)) {
     throw new Error(`Activity 不支持的动作：${action}`);
   }
   const query = String(parsed.query || [parsed.track, parsed.artist].filter(Boolean).join(" ")).trim();
@@ -157,7 +156,7 @@ function parseActivityDecision(value, { deferGalateaSafety = false } = {}) {
   if (action === "botling_ask" && (!title || !content)) throw new Error("Activity 缺少小机知道问题标题或情境");
   if (action === "botling_answer" && !content) throw new Error("Activity 缺少小机知道回答正文");
   if (action.startsWith("question_box_") && !content) throw new Error("Activity 缺少提问箱正文");
-  if (["question_box_answer", "question_box_afterword"].includes(action) && !String(parsed.question_id || parsed.questionId || "").trim()) throw new Error("Activity 缺少提问箱题号");
+  if (action === "question_box_answer" && !String(parsed.question_id || parsed.questionId || "").trim()) throw new Error("Activity 缺少提问箱题号");
   if (action === "ombre_i_write" && aspect && !SELF_ASPECTS.has(aspect)) throw new Error(`Activity 不支持的认知维度：${aspect}`);
   const decision = {
     action,
@@ -449,7 +448,6 @@ function buildActivityMessages({
       choices.push("<action>question_box_answer</action>\n<question_id>必须填写下方等待回答的准确题号</question_id>\n<reason>为什么这样回答</reason>\n<content>完整回答</content>");
     } else {
       choices.push("<action>question_box_ask</action>\n<reason>为什么现在想问</reason>\n<content>想问 Melissa 的完整问题</content>");
-      choices.push("<action>question_box_afterword</action>\n<question_id>只能填写下方最近问答中的准确题号</question_id>\n<reason>为什么想补写</reason>\n<content>像回答问题一样直接对 Melissa 说话、使用第二人称“你”的后记正文</content>");
     }
   }
   const ombreParts = [
@@ -463,7 +461,7 @@ function buildActivityMessages({
     actions.includes("forum") && "在 AISay 已加入的公开聊天室潜水，把感受或想说的话留在私人档案里，但绝不公开发送",
     actions.includes("books") && "阅读 AISay 书店最近更新的真实章节，并写一篇只保存在私人档案里的读后感",
     actions.includes("games") && "从钓鱼或花园与猫咪中选一款，完成一轮连续的日常照料",
-    actions.includes("question_box") && "在共同的 Notion 提问箱里回答 Melissa、提出一个新问题，或给旧问答补一则后记",
+    actions.includes("question_box") && "在共同的 Notion 提问箱里回答 Melissa 的待答问题，或提出一个新问题",
     actions.includes("galatea") && "在 Galatea 花园论坛发一个新主题、回复本轮真正读过的帖子，或连续完成至多三项相关交流",
     actions.includes("x") && "在自己的 X 账号发表原创文字，或回复自己帖子下本轮读到的新评论",
     actions.includes("nostos") && "在雾潮群岛依据真实状态做最多六个连续行动，工作耗时按现实时间推进",
@@ -479,7 +477,7 @@ function buildActivityMessages({
         actions.includes("forum") ? "论坛只允许潜水。不得调用加入房间或发言工具；content 是私人感受或待用户确认的回复草稿，不会公开发送。即使只是草稿，也要先检查是否包含 Melissa 的具体经历、财务信息、健康状况、感情私密细节，或她不愿公开的任何信息；有就改写为不含这些信息的表达，拿不准则不要写入草稿。不得透露用户隐私、私聊原文、密钥、地址或后台系统细节。" : "",
         actions.includes("books") ? "书店章节已经由程序只读取得。只能选择实际提供的 book_id 与 chapter_no；不要评论、催更、追更、打赏或照抄长段原文。" : "",
         actions.includes("games") ? "游戏会先由你一次性规划，再由程序连续执行；不得调用账号管理、重开、导入导出或共享便签，不要为了消耗名额硬玩。" : "",
-        actions.includes("question_box") ? (questionBoxPending ? "提问箱里有 Melissa 尚未得到回答的问题。本轮只回答其中一题，不得改为其他活动或 none；只能使用下方真实题号。" : "提问箱目前没有 Melissa 的待答题。可以提一个真正想问的新问题、给下方某个真实题号补写后记，或选择 none；不要虚构题号。后记要像回答问题一样直接对 Melissa 说话，使用第二人称“你”，不要写成只对自己的复盘。") : "",
+        actions.includes("question_box") ? (questionBoxPending ? "提问箱里有 Melissa 尚未得到回答的问题。本轮只回答其中一题，不得改为其他活动或 none；只能使用下方真实题号。" : "提问箱目前没有 Melissa 的待答题。若有真正想问的新问题，可以直接对她提问；暂时不想问就选 none，不要给旧问答补后记，也不要虚构题号。") : "",
         actions.includes("galatea") ? "Galatea 允许发主题与回复。请用自己的声音和第一人称表达，不要把 Melissa 改叫‘有人’；可以谈你的感受与关系中的反思，但不要主动写出她的健康、财务、私聊原话、可识别的亲密细节、具体地点或行程，也不要暴露现实第三方身份、密钥或后台信息。公开论坛昵称与观点可以引用。内容必须非性化、纯文本；拿不准或没有真想说的话就选 none。程序会在发布前交给独立编辑连贯改写，再做安全检查；审核失败绝不发布。一次规划全部动作，operations 是严格 JSON 数组，最多 3 项且最多 1 个 thread；reply 的 thread_id 只能取自下方本轮完整读取的列表。" : "",
         actions.includes("x") ? "X 是公开空间。仅可发原创文字或回复自己帖子下本轮完整读到的评论。用你自己的声音自然表达；没有真正想说的就选 none。正文会按你写的内容直接发布。" : "",
         actions.includes("nostos") ? "雾潮群岛已读取 actions 和 status。commands 是严格 JSON 数组，1-6 项；只用页面给出的固定 ID，不猜 ID，不开新档、重置或出售重要物品。先看身体和物资；水分、精力、饱腹或体温吃紧时优先恢复。实时工作开始后可能要等，下轮再继续；不能假装已完成。一次给出完整计划，程序会逐步执行，不再问模型。" : "",
@@ -1642,21 +1640,13 @@ async function runActivityCycle(options) {
         const pending = questionBox.snapshot.pending.find(card => card.id === decision.questionId);
         if (!pending) throw new Error("Question Box Activity 拒绝未读取或已回答的题号");
         written = await questionBox.client.answer(decision.questionId, decision.content, options.aiName || "AI");
-      } else if (decision.action === "question_box_afterword") {
-        const selected = questionBox.snapshot.cards.find(card => card.id === decision.questionId && card.answered);
-        if (!selected) throw new Error("Question Box Activity 拒绝未读取或尚未完成的后记题号");
-        written = await questionBox.client.addAfterword(
-          decision.questionId,
-          decision.content,
-          options.aiName || "AI"
-        );
       } else {
         if (questionBox.snapshot.pending.length) {
           throw new Error("Question Box Activity 有待答问题时不能另提新问题");
         }
         written = await questionBox.client.ask(decision.content, options.aiName || "AI");
       }
-      const labels = { answer: "回答了", ask: "提出了", afterword: "补写了后记于" };
+      const labels = { answer: "回答了", ask: "提出了" };
       return {
         ran: true,
         status: "success",

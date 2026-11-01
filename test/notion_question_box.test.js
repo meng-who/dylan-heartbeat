@@ -175,7 +175,7 @@ test("when no question is pending the model can ask one with one model request",
   assert.match(JSON.stringify(append.body), /最想留住哪个瞬间/);
 });
 
-test("when no question is pending the model can append an afterword with one model request", async () => {
+test("legacy afterword output is rejected without writing to Notion", async () => {
   const roots = [heading("q1", "Q-001 · From：Cy")];
   const childrenById = {
     q1: cardChildren("q1", { question: "旧问题", asker: "Cy", answer: "旧回答", answerer: "Melissa" })
@@ -185,7 +185,7 @@ test("when no question is pending the model can append an afterword with one mod
     childrenById,
     modelOutput: "<activity><action>question_box_afterword</action><question_id>Q-001</question_id><reason>后来又想到一点</reason><content>现在回看，我会把答案说得更轻一点。</content></activity>"
   });
-  const result = await runActivityCycle({
+  await assert.rejects(() => runActivityCycle({
     apiUrl: "https://model.test/v1/chat/completions",
     model: "model",
     enabledActions: "question_box",
@@ -194,13 +194,7 @@ test("when no question is pending the model can append an afterword with one mod
     notionApiBase: "https://notion.test/v1",
     aiName: "Cy",
     fetchImpl: mock.fetchImpl
-  });
-  assert.equal(result.status, "success");
-  assert.equal(result.questionBoxAction, "afterword");
-  assert.equal(result.questionId, "Q-001");
+  }), /不支持的动作：question_box_afterword/);
   assert.equal(mock.modelCalls, 1);
-  const modelMessages = mock.calls.find(call => call.url.includes("model.test")).body.messages;
-  assert.match(modelMessages.map(message => message.content).join("\n"), /第二人称“你”/);
-  const append = mock.calls.find(call => call.method === "PATCH" && call.url.includes("/q1/children"));
-  assert.match(JSON.stringify(append.body), /现在回看/);
+  assert.equal(mock.calls.some(call => call.method === "PATCH"), false);
 });
