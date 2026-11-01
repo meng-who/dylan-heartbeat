@@ -54,6 +54,15 @@ test("X allows a third original post but omits posting after the daily cap", asy
   assert.equal(written.length, 1);
 });
 
+test("Ombre letters invite reflection without turning every activity into a diary", () => {
+  const letterPrompt = buildActivityMessages({ enabledActions: ["ombre"] })[0].content;
+  assert.match(letterPrompt, /而不是按时间顺序复述今天发生了什么/);
+  assert.match(letterPrompt, /没能或没敢说出口/);
+  assert.match(letterPrompt, /不要编造未发生的对话或感受/);
+  assert.match(letterPrompt, /可以选择不写信/);
+  assert.doesNotMatch(buildActivityMessages({ enabledActions: ["books"] })[0].content, /没能或没敢说出口/);
+});
+
 test("retains blocked Galatea drafts privately with the matching safety clue", () => {
   const operations = [{ type: "reply", thread_id: 31699, body: "下周旅行让我想到一些小事。" }];
   const decision = parseActivityDecision(JSON.stringify({ action: "galatea_publish", reason: "想回复", operations }));
