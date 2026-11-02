@@ -1080,6 +1080,22 @@ test("validates a bounded Galatea plan", () => {
   assert.match(held.reason, /未发布/);
 });
 
+test("accepts bounded Galatea JSON wrappers but rejects malformed drafts", () => {
+  const operation = { type: "reply", thread_id: 42, body: "我想认真回应。" };
+  for (const value of [
+    JSON.stringify([operation]),
+    "```json\n" + JSON.stringify([operation]) + "\n```",
+    JSON.stringify({ operations: [operation] }),
+    JSON.stringify(operation)
+  ]) {
+    const decision = parseActivityDecision(`<activity><action>galatea_publish</action><operations>${value}</operations></activity>`);
+    assert.deepEqual(decision.galateaOperations, [{ type: "reply", threadId: 42, body: operation.body }]);
+  }
+  assert.throws(() => parseActivityDecision('<activity><action>galatea_publish</action><operations>[{"type":"reply","thread_id":42,"body":"引号"没转义"}]</operations></activity>'), /JSON 语法无效/);
+  assert.throws(() => validateGalateaOperations({ unrelated: "do not publish" }), /非空 JSON 数组/);
+  assert.match(buildActivityMessages({ enabledActions: ["galatea"] })[1].content, /operations 内只放合法 JSON/);
+});
+
 test("reads Galatea once, plans once, and mechanically confirms a reply", async () => {
   const calls = [];
   let reviews = 0;

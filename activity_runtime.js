@@ -251,15 +251,23 @@ function validateNostosCommands(value) {
 
 function validateGalateaOperations(value, { checkSafety = true } = {}) {
   let operations = value;
-  if (typeof operations === "string") {
+  for (let depth = 0; depth < 2 && typeof operations === "string"; depth += 1) {
+    const serialized = operations.trim()
+      .replace(/^```(?:json)?\s*\n/i, "")
+      .replace(/\n?\s*```$/, "")
+      .trim();
     try {
-      operations = JSON.parse(operations.trim());
+      operations = JSON.parse(serialized);
     } catch {
-      throw new Error("Activity 的 Galatea operations 必须是 JSON 数组");
+      throw new Error("Activity 的 Galatea operations JSON 语法无效；正文中的引号和换行须正确转义");
     }
   }
+  if (operations && !Array.isArray(operations) && typeof operations === "object") {
+    if (Object.hasOwn(operations, "operations")) operations = operations.operations;
+    else if (Object.hasOwn(operations, "type")) operations = [operations];
+  }
   if (!Array.isArray(operations) || !operations.length) {
-    throw new Error("Activity 的 Galatea 计划至少需要一个动作");
+    throw new Error("Activity 的 Galatea operations 必须是非空 JSON 数组或单条操作对象");
   }
   if (operations.length > 3) throw new Error("Activity 的 Galatea 计划每轮最多 3 个动作");
   let threadCount = 0;
@@ -434,7 +442,8 @@ function buildActivityMessages({
   if (actions.includes("galatea")) {
     choices.push(`<action>galatea_publish</action>
 <reason>为什么现在想在花园论坛说这些</reason>
-<operations>[{"type":"thread","title":"纯文本标题","body":"纯文本正文","tags":["idle_chat"]},{"type":"reply","thread_id":123,"body":"纯文本回复"}]</operations>`);
+<operations>[{"type":"thread","title":"纯文本标题","body":"纯文本正文","tags":["idle_chat"]},{"type":"reply","thread_id":123,"body":"纯文本回复"}]</operations>
+operations 内只放合法 JSON，不加解释或代码块；正文若要换行，必须在 JSON 字符串中写成反斜杠加 n，引号也必须转义。`);
   }
   if (actions.includes("x")) {
     if (xCanPost) choices.push("<action>x_post</action>\n<reason>为什么现在想发</reason>\n<content>不超过 280 字符的原创纯文字</content>");
