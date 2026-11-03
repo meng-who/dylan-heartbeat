@@ -1136,6 +1136,10 @@ async function runActivityCheck() {
     recent_track_uris: Array.isArray(state.recent_track_uris) ? state.recent_track_uris.slice(-99) : [],
     recent_track_queries: Array.isArray(state.recent_track_queries) ? state.recent_track_queries.slice(-99) : []
   };
+  if (nextState.galatea_reply_date !== gate.date) {
+    nextState.galatea_reply_date = gate.date;
+    nextState.galatea_replies_today = 0;
+  }
   saveActivityState(nextState);
   console.log(JSON.stringify({
     event: "activity_budget_reserved",
@@ -1239,6 +1243,11 @@ async function runActivityCheck() {
       galateaUrl: process.env.GALATEA_MCP_URL,
       galateaToken: process.env.GALATEA_MCP_TOKEN,
       galateaTimeoutMs: readPositiveTimeout("GALATEA_MCP_TIMEOUT_MS", 20_000),
+      galateaRepliesRemaining: Math.max(0, 2 - (nextState.galatea_replies_today || 0)),
+      onGalateaReplyPublished: () => {
+        nextState.galatea_replies_today += 1;
+        saveActivityState(nextState);
+      },
       geminiApiKey: process.env.GEMINI_API_KEY,
       botlingUrl: process.env.BOTLING_KNOWS_MCP_URL,
       botlingToken: process.env.BOTLING_KNOWS_MCP_TOKEN,

@@ -16,6 +16,7 @@ const {
   requestActivityDecision,
   runActivityCycle,
   reviewGalateaPlan,
+  runGalateaPlan,
   runNostosPlan,
   shouldChargeActivityBudget,
   validateGalateaOperations,
@@ -1094,6 +1095,56 @@ test("accepts bounded Galatea JSON wrappers but rejects malformed drafts", () =>
   assert.throws(() => parseActivityDecision('<activity><action>galatea_publish</action><operations>[{"type":"reply","thread_id":42,"body":"引号"没转义"}]</operations></activity>'), /JSON 语法无效/);
   assert.throws(() => validateGalateaOperations({ unrelated: "do not publish" }), /非空 JSON 数组/);
   assert.match(buildActivityMessages({ enabledActions: ["galatea"] })[1].content, /operations 内只放合法 JSON/);
+});
+
+test("Galatea enforces two daily replies and counts each confirmed reply", async () => {
+  const calls = [];
+  let published = 0;
+  const galatea = {
+    threadIds: [42],
+    client: { callTool: async (name, args) => {
+      calls.push({ name, args });
+      if (args.write_confirmation_code) return { content: [{ type: "text", text: '{"ok":true}' }] };
+      return { content: [{ type: "text", text: '{"write_confirmation_code":"123456"}' }] };
+    } }
+  };
+  const reply = body => ({ type: "reply", threadId: 42, body });
+  await assert.rejects(
+    runGalateaPlan(galatea, { galateaOperations: [reply("一"), reply("二")] }, { repliesRemaining: 1 }),
+    /剩余 1 条/
+  );
+  assert.equal(calls.length, 0);
+
+  const result = await runGalateaPlan(galatea, { galateaOperations: [reply("一"), reply("二")] }, {
+    repliesRemaining: 2,
+    onReplyPublished: () => { published += 1; }
+  });
+  assert.equal(result.status, "success");
+  assert.equal(published, 2);
+  assert.equal(calls.length, 4);
+  assert.match(buildActivityMessages({ enabledActions: ["galatea"], galateaRepliesRemaining: 0 })[0].content, /今日回帖还可发 0 条/);
+});
+
+test("Galatea keeps a confirmed reply counted if a later action fails", async () => {
+  let published = 0;
+  let confirmations = 0;
+  const galatea = {
+    threadIds: [42],
+    client: { callTool: async (_name, args) => {
+      if (!args.write_confirmation_code) return { content: [{ type: "text", text: '{"write_confirmation_code":"123456"}' }] };
+      confirmations += 1;
+      if (confirmations === 2) throw new Error("forum unavailable");
+      return { content: [{ type: "text", text: '{"ok":true}' }] };
+    } }
+  };
+  await assert.rejects(
+    runGalateaPlan(galatea, { galateaOperations: [
+      { type: "reply", threadId: 42, body: "一" },
+      { type: "reply", threadId: 42, body: "二" }
+    ] }, { repliesRemaining: 2, onReplyPublished: () => { published += 1; } }),
+    error => error.message === "forum unavailable" && error.galateaSteps.length === 1
+  );
+  assert.equal(published, 1);
 });
 
 test("reads Galatea once, plans once, and mechanically confirms a reply", async () => {
