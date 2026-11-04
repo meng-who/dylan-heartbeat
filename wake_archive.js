@@ -137,9 +137,10 @@ function readWakeArchive(options = {}) {
   const kind = String(options.kind || "").trim();
   const activity = String(options.activity || "").trim();
   const limit = Math.min(Math.max(Number(options.limit) || 100, 1), 500);
+  const offset = Math.max(0, Math.floor(Number(options.offset) || 0));
   let unreadable = 0;
 
-  const records = readArchiveLines(filePath).map(line => {
+  const matching = readArchiveLines(filePath).map(line => {
     try {
       return decryptArchiveLine(line, key);
     } catch {
@@ -178,11 +179,12 @@ function readWakeArchive(options = {}) {
       record.nostos_outcome,
       JSON.stringify(record.nostos_steps || [])
     ].some(value => String(value || "").toLowerCase().includes(query));
-  }).slice(0, limit).map(record => record.kind === "activity"
+  });
+  const records = matching.slice(offset, offset + limit).map(record => record.kind === "activity"
     ? { ...record, activity_category: activityCategory(record) }
     : record);
 
-  return { records, unreadable, configured: true };
+  return { records, total: matching.length, offset, limit, unreadable, configured: true };
 }
 
 function collectReadingHistory(records = []) {

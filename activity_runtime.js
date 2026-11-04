@@ -1622,6 +1622,16 @@ async function runActivityCycle(options) {
         })
       );
   if (decision.action === "none") {
+    if (decision.blockedSource === "galatea") {
+      let blockedReplies = 0;
+      try {
+        blockedReplies = validateGalateaOperations(decision.content, { checkSafety: false })
+          .filter(operation => operation.type === "reply").length;
+      } catch {}
+      const consumed = Math.min(blockedReplies, options.galateaRepliesRemaining ?? 2);
+      for (let index = 0; index < consumed; index += 1) await options.onGalateaReplyPublished?.();
+      return { ran: true, status: "kept_private", decision, source: "galatea", reason: decision.blockedReason || "", galateaReplySlotsConsumed: consumed };
+    }
     return { ran: true, status: "kept_private", decision, source: decision.blockedSource || "private", reason: decision.blockedReason || "" };
   }
 
@@ -1651,6 +1661,11 @@ async function runActivityCycle(options) {
       const unknownThread = decision.galateaOperations.find(operation => operation.type === "reply" && !galatea.threadIds.includes(operation.threadId));
       if (unknownThread) throw new Error(`Galatea Activity 拒绝回复本轮未完整读取的 thread_id：${unknownThread.threadId}`);
       const reviewed = await reviewGalateaPlan(decision, options);
+      if (reviewed.status === "kept_private") {
+        const heldReplies = decision.galateaOperations.filter(operation => operation.type === "reply").length;
+        for (let index = 0; index < heldReplies; index += 1) await options.onGalateaReplyPublished?.();
+        return { ran: true, ...reviewed, galateaReplySlotsConsumed: heldReplies };
+      }
       if (!reviewed.decision || reviewed.status) return { ran: true, ...reviewed };
       try {
         return { ...(await runGalateaPlan(galatea, reviewed.decision, {

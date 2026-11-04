@@ -1226,6 +1226,40 @@ test("Galatea keeps a confirmed reply counted if a later action fails", async ()
   assert.equal(published, 1);
 });
 
+test("a Galatea reply held privately consumes one reply slot without publishing", async () => {
+  let charged = 0;
+  let writes = 0;
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    if (String(url).includes("model.test")) return reply({ choices: [{ message: { content: JSON.stringify({
+      action: "galatea_publish", operations: [{ type: "reply", thread_id: 42, body: "她被猫抓了嘴唇。" }]
+    }) } }] });
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "get_self" }, { name: "list_threads" }, { name: "get_thread" }, { name: "list_activity" },
+      { name: "create_thread" }, { name: "create_reply" }
+    ] } });
+    if (body.params?.name === "create_reply") writes += 1;
+    const data = body.params?.name === "list_threads" ? { threads: [{ id: 42, title: "讨论", excerpt: "摘要" }] } : { thread_id: 42, body: "帖子" };
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify(data) }] } });
+  };
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions", model: "model", enabledActions: ["galatea"],
+    galateaUrl: "https://galatea.test/mcp", galateaToken: "key", fetchImpl,
+    geminiApiKey: "review-key",
+    geminiFetchImpl: async () => reply({ candidates: [{ finishReason: "STOP", content: { parts: [{ text: JSON.stringify({ results: [
+      { id: 0, decision: "edit", title: "", body: "她被猫抓了嘴唇。", changes: [] }
+    ] }) }] } }] }),
+    galateaRepliesRemaining: 1, onGalateaReplyPublished: () => { charged += 1; }
+  });
+  assert.equal(result.status, "kept_private");
+  assert.equal(result.galateaReplySlotsConsumed, 1);
+  assert.equal(charged, 1);
+  assert.equal(writes, 0);
+});
+
 test("reads Galatea once, plans once, and mechanically confirms a reply", async () => {
   const calls = [];
   let reviews = 0;

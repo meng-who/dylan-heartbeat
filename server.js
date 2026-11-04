@@ -1339,6 +1339,8 @@ function archivePageHtml() {
     input, select { width: 100%; min-height: 40px; border: 1px solid #d9cbd0; border-radius: 6px; padding: 8px 10px; color: #352e31; background: #fff; font: inherit; }
     input:focus, select:focus { outline: 2px solid #e8cbd4; border-color: #a96c7d; }
     #summary { min-height: 24px; margin: 16px 0 8px; color: #776b70; font-size: 13px; }
+    .archive-pagination { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0 12px; }
+    .archive-pagination button:disabled { opacity: .45; cursor: default; }
     .record { padding: 20px 0; border-bottom: 1px solid #eadde1; }
     .record-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .status { border-radius: 999px; padding: 3px 8px; color: #fff; background: #71666a; font-size: 12px; }
@@ -1424,7 +1426,9 @@ function archivePageHtml() {
       <button id="refresh" type="button">刷新</button>
     </div>
     <div id="summary"></div>
+    <div class="archive-pagination" aria-label="档案分页"><button id="previous-page" type="button">上一页</button><span id="page-label"></span><button id="next-page" type="button">下一页</button></div>
     <section id="records" aria-live="polite"></section>
+    <div class="archive-pagination" aria-label="档案分页"><button id="previous-page-bottom" type="button">上一页</button><span id="page-label-bottom"></span><button id="next-page-bottom" type="button">下一页</button></div>
   </main>
   <nav class="archive-hub-bar" aria-label="Dylan 后台页面">
     <a class="archive-hub-tab" href="/pulse">身体状态</a>
@@ -1444,6 +1448,14 @@ function archivePageHtml() {
     const status = document.getElementById("status");
     const records = document.getElementById("records");
     const summary = document.getElementById("summary");
+    const previousPage = document.getElementById("previous-page");
+    const nextPage = document.getElementById("next-page");
+    const pageLabel = document.getElementById("page-label");
+    const previousPageBottom = document.getElementById("previous-page-bottom");
+    const nextPageBottom = document.getElementById("next-page-bottom");
+    const pageLabelBottom = document.getElementById("page-label-bottom");
+    let page = 0;
+    const pageSize = 100;
 
     function node(tag, className, text) {
       const element = document.createElement(tag);
@@ -1467,7 +1479,7 @@ function archivePageHtml() {
     async function loadArchive() {
       summary.textContent = "读取中...";
       records.replaceChildren();
-      const params = new URLSearchParams({ limit: "200" });
+      const params = new URLSearchParams({ limit: String(pageSize), offset: String(page * pageSize) });
       if (query.value.trim()) params.set("q", query.value.trim());
       if (kind.value) params.set("kind", kind.value);
       if (kind.value === "activity" && activity.value) params.set("activity", activity.value);
@@ -1476,7 +1488,14 @@ function archivePageHtml() {
         const response = await fetch("/admin/archive/data?" + params.toString(), { cache: "no-store" });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || "读取失败");
-        summary.textContent = "共显示 " + data.records.length + " 条" + (data.unreadable ? "，另有 " + data.unreadable + " 条无法解密" : "");
+        if (page > 0 && !data.records.length && data.total > 0) { page = Math.ceil(data.total / pageSize) - 1; return loadArchive(); }
+        summary.textContent = "共 " + data.total + " 条，当前显示 " + data.records.length + " 条" + (data.unreadable ? "，另有 " + data.unreadable + " 条无法解密" : "");
+        pageLabel.textContent = "第 " + (page + 1) + " / " + Math.max(1, Math.ceil(data.total / pageSize)) + " 页";
+        pageLabelBottom.textContent = pageLabel.textContent;
+        previousPage.disabled = page === 0;
+        previousPageBottom.disabled = previousPage.disabled;
+        nextPage.disabled = (page + 1) * pageSize >= data.total;
+        nextPageBottom.disabled = nextPage.disabled;
         if (!data.records.length) {
           records.append(node("div", "empty", "还没有符合条件的档案。"));
           return;
@@ -1564,6 +1583,7 @@ function archivePageHtml() {
       if (item.used_backup) details.push("使用备用模型");
       if (item.source) details.push("来源：" + item.source);
       if (item.action) details.push("动作：" + item.action);
+      if (item.galatea_reply_slots_consumed) details.push("花园回帖额度：本次占用 " + item.galatea_reply_slots_consumed + " 次（未发布）");
       if (item.track_uri) details.push("歌曲：" + item.track_uri);
       if (item.book_title || item.book_id) {
         details.push("读书：" + (item.book_title || item.book_id) + (item.chapter_no ? " · 第 " + item.chapter_no + " 章" : ""));
@@ -1667,17 +1687,19 @@ function archivePageHtml() {
     let searchTimer;
     query.addEventListener("input", () => {
       clearTimeout(searchTimer);
-      searchTimer = setTimeout(loadArchive, 250);
+      searchTimer = setTimeout(() => { page = 0; loadArchive(); }, 250);
     });
-    status.addEventListener("change", loadArchive);
+    status.addEventListener("change", () => { page = 0; loadArchive(); });
     kind.addEventListener("change", () => {
       activity.hidden = kind.value !== "activity";
       activity.disabled = activity.hidden;
       activity.closest(".toolbar").classList.toggle("with-activity", !activity.hidden);
       if (activity.hidden) activity.value = "";
-      loadArchive();
+      page = 0; loadArchive();
     });
-    activity.addEventListener("change", loadArchive);
+    activity.addEventListener("change", () => { page = 0; loadArchive(); });
+    for (const button of [previousPage, previousPageBottom]) button.addEventListener("click", () => { if (page > 0) { page -= 1; loadArchive(); } });
+    for (const button of [nextPage, nextPageBottom]) button.addEventListener("click", () => { page += 1; loadArchive(); });
     document.getElementById("refresh").addEventListener("click", loadArchive);
     loadArchive();
   </script>
@@ -1708,7 +1730,8 @@ app.get("/admin/archive/data", { preHandler: basicAuth }, async (req, reply) => 
       status: req.query?.status,
       kind: req.query?.kind,
       activity: req.query?.activity,
-      limit: req.query?.limit
+      limit: req.query?.limit,
+      offset: req.query?.offset
     });
   } catch (error) {
     req.log.error({ event: "wake_archive_read_failed", error: error.message });

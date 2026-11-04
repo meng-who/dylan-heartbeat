@@ -1375,6 +1375,7 @@ async function runActivityCheck() {
     galatea_steps: Array.isArray(result.galateaSteps) ? result.galateaSteps : [],
     galatea_outcome: result.galateaOutcome || "",
     galatea_review: result.decision?.galateaReview || [],
+    galatea_reply_slots_consumed: result.galateaReplySlotsConsumed || 0,
     botling_steps: Array.isArray(result.botlingSteps) ? result.botlingSteps : [],
     botling_outcome: result.botlingOutcome || "",
     botling_question_id: result.decision?.botlingQuestionId || 0,

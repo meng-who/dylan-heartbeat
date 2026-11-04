@@ -47,6 +47,25 @@ test("filters activity before applying the record limit", () => {
   }
 });
 
+test("paginates the complete filtered archive without deleting older records", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "archive-pages-"));
+  const filePath = path.join(directory, "archive.enc.jsonl");
+  const key = crypto.randomBytes(32);
+  try {
+    for (let index = 0; index < 205; index += 1) {
+      appendWakeArchive({ id: String(index), kind: "activity", status: "success" }, { key, filePath });
+    }
+    const first = readWakeArchive({ key, filePath, kind: "activity", limit: 100 });
+    const third = readWakeArchive({ key, filePath, kind: "activity", limit: 100, offset: 200 });
+    assert.equal(first.total, 205);
+    assert.equal(first.records.length, 100);
+    assert.deepEqual(third.records.map(record => record.id), ["4", "3", "2", "1", "0"]);
+    assert.equal(readWakeArchive({ key, filePath, kind: "activity", status: "failed" }).total, 0);
+  } finally {
+    fs.rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("encrypts archive records without leaving plaintext on disk", () => {
   const key = crypto.randomBytes(32);
   const line = encryptArchiveRecord({ id: "one", candidate: "这是一条秘密推送" }, key);
