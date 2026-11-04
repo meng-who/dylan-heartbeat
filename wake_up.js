@@ -10,7 +10,7 @@ const {
   parseNoActionDirective,
   repairWrongLocalGreeting
 } = require("./wake_guardrails");
-const { isSpecialEventContent } = require("./special_events");
+const { classifySpecialEventContent, isSpecialEventContent } = require("./special_events");
 const { findSimilarRecentPush, getLatestSentPushTime, getRecentSentPushes } = require("./wake_dedup");
 const { appendWakeArchive, archiveConfigured, buildWakeArchiveOutcome, readReadingHistory } = require("./wake_archive");
 const { runSoloCycle } = require("./solo_runtime");
@@ -18,6 +18,7 @@ const { OmbreMcpClient } = require("./ombre_mcp_client");
 const { readDreamMemory, runDreamCycle } = require("./dream_runtime");
 const {
   activityGate,
+  activityContentFingerprint,
   classifyActivityFailure,
   parseEnabledActions,
   runActivityCycle,
@@ -1157,6 +1158,10 @@ async function runActivityCheck() {
     .slice(-historyLimit)
     .map(message => `${message.role === "user" ? (process.env.USER_DISPLAY_NAME || "用户") : (process.env.AI_DISPLAY_NAME || "AI")}：${normalizeContentToText(message.content)}`)
     .join("\n\n");
+  const recentActivityEvents = messages
+    .filter(message => classifySpecialEventContent(normalizeContentToText(message?.content)) === "activity")
+    .slice(-3)
+    .map(message => normalizeContentToText(message.content).slice(0, 1200));
   const latestUserText = [...cleanMessages]
     .reverse()
     .find(message => message.role === "user");
@@ -1214,11 +1219,14 @@ async function runActivityCheck() {
       modelTimeoutMs: WAKE_UPSTREAM_TIMEOUT_MS,
       systemPrompt,
       history,
+      recentActivityEvents,
       latestUserText: latestUserText ? normalizeContentToText(latestUserText.content) : "",
       readingHistory,
       enabledActions,
       xEnv: process.env,
       xSeenReplies: Array.isArray(nextState.x_seen_replies) ? nextState.x_seen_replies : [],
+      recentXPostHashes: Array.isArray(nextState.recent_x_post_hashes) ? nextState.recent_x_post_hashes : [],
+      recentOmbreIHashes: Array.isArray(nextState.recent_ombre_i_hashes) ? nextState.recent_ombre_i_hashes : [],
       xPostsToday: nextState.x_date === gate.date ? nextState.x_posts_today || 0 : 0,
       xPostLimit: Math.floor(readNumberEnv("X_MAX_POSTS_PER_DAY", 3, { min: 1, max: 24 })),
       xRepliesToday: nextState.x_date === gate.date ? nextState.x_replies_today || 0 : 0,
@@ -1276,6 +1284,14 @@ async function runActivityCheck() {
       }
       if (result.decision?.action === "x_post") nextState.x_posts_today += 1;
       if (result.decision?.action === "x_reply") nextState.x_replies_today += 1;
+      saveActivityState(nextState);
+    }
+    if (result.status === "success" && result.decision?.action === "x_post") {
+      nextState.recent_x_post_hashes = [...(nextState.recent_x_post_hashes || []), activityContentFingerprint(result.decision.content)].slice(-100);
+      saveActivityState(nextState);
+    }
+    if (result.status === "success" && result.decision?.action === "ombre_i_write") {
+      nextState.recent_ombre_i_hashes = [...(nextState.recent_ombre_i_hashes || []), activityContentFingerprint(result.decision.content)].slice(-100);
       saveActivityState(nextState);
     }
   } catch (error) {

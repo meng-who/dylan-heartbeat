@@ -3,6 +3,7 @@ const test = require("node:test");
 
 const {
   activityGate,
+  activityContentFingerprint,
   buildActivityMessages,
   buildReadingHistoryContext,
   classifyActivityFailure,
@@ -23,6 +24,84 @@ const {
   validateGameCommands,
   validateNostosCommands
 } = require("../activity_runtime");
+
+test("recent completed activities are shown separately from chat history", () => {
+  const messages = buildActivityMessages({
+    enabledActions: ["ombre", "x"],
+    history: "最近聊天",
+    recentActivityEvents: ["（2026-11-04 03:36 自主活动：发布了 X 帖子）"]
+  });
+  assert.match(messages[1].content, /最近已完成的自主活动/);
+  assert.match(messages[1].content, /03:36 自主活动/);
+  assert.match(messages[0].content, /已有的自我认知不要再次写入/);
+});
+
+test("skips an X post already present in the recent own-post snapshot", async () => {
+  const content = "She makes me smile today.";
+  let writes = 0;
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const target = String(url);
+    if (target.endsWith("/2/users/me")) return reply({ data: { id: "12", username: "cy" } });
+    if (target.includes("/2/users/12/tweets")) return reply({ data: [{ id: "99", text: content }] });
+    if (target.includes("/2/tweets/search/recent")) return reply({ data: [] });
+    if (target.includes("model.test")) return reply({ choices: [{ message: { content: JSON.stringify({ action: "x_post", content }) } }] });
+    if (target.endsWith("/2/tweets") && init.method === "POST") { writes += 1; return reply({ data: { id: "100" } }); }
+    throw new Error(`Unexpected request: ${target}`);
+  };
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions", model: "model", enabledActions: ["x"],
+    xEnv: { X_API_KEY: "key", X_API_SECRET: "secret", X_ACCESS_TOKEN: "token", X_ACCESS_TOKEN_SECRET: "token-secret" },
+    fetchImpl
+  });
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "recent_duplicate_x_post");
+  assert.equal(result.source, "x");
+  assert.equal(writes, 0);
+});
+
+test("an X API failure keeps the X source in Archive", async () => {
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    const target = String(url);
+    if (target.endsWith("/2/users/me")) return reply({ data: { id: "12", username: "cy" } });
+    if (target.includes("/2/users/12/tweets")) return reply({ data: [] });
+    if (target.includes("model.test")) return reply({ choices: [{ message: { content: JSON.stringify({ action: "x_post", content: "A new thought." }) } }] });
+    if (target.endsWith("/2/tweets") && init.method === "POST") return new Response("Forbidden", { status: 403 });
+    throw new Error(`Unexpected request: ${target}`);
+  };
+  await assert.rejects(runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions", model: "model", enabledActions: ["x"],
+    xEnv: { X_API_KEY: "key", X_API_SECRET: "secret", X_ACCESS_TOKEN: "token", X_ACCESS_TOKEN_SECRET: "token-secret" },
+    fetchImpl
+  }), error => error.activitySource === "x" && error.activityDecision.action === "x_post");
+});
+
+test("skips an Ombre I candidate already written in the recent read", async () => {
+  const content = "我愿意把不确定留在身边，先停一下再决定。";
+  let writes = 0;
+  const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
+  const fetchImpl = async (url, init) => {
+    if (String(url).includes("model.test")) return reply({ choices: [{ message: { content: JSON.stringify({ action: "ombre_i_write", content }) } }] });
+    const body = JSON.parse(init.body);
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "feel" }, { name: "I" }, { name: "letter_read" }, { name: "letter_write" }
+    ] } });
+    if (body.params?.name === "I" && body.params.arguments?.content) writes += 1;
+    const text = body.params?.name === "I" ? `已有内容：${content}` : "ok";
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text }] } });
+  };
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions", model: "model", enabledActions: ["ombre"],
+    ombreUrl: "https://ombre.test/mcp", fetchImpl
+  });
+  assert.equal(result.status, "skipped");
+  assert.equal(result.reason, "recent_duplicate_ombre_i");
+  assert.equal(writes, 0);
+  assert.equal(activityContentFingerprint("同一段文字！"), activityContentFingerprint("同一段文字。"));
+});
 
 test("X allows a third original post but omits posting after the daily cap", async () => {
   const env = { X_API_KEY: "key", X_API_SECRET: "secret", X_ACCESS_TOKEN: "token", X_ACCESS_TOKEN_SECRET: "token-secret" };
