@@ -11,7 +11,7 @@ const SELF_ASPECTS = new Set(["nature", "values", "patterns", "limits", "becomin
 const AUTONOMOUS_GAMES = new Set(["fishing", "garden_cat"]);
 const GALATEA_WRITE_TOOLS = new Set(["create_thread", "create_reply"]);
 const GALATEA_SEXUAL_CONTENT_PATTERN = /性行为|性暗示|性描写|性器官|性欲|性幻想|色情|情色|肉欲|欲火|床笫|做爱|性爱|性交|口交|自慰|手淫|勃起|射精|高潮|调情|挑逗|裸聊|裸露|淫荡|淫秽|\b(?:explicit\s+sex|sexual(?:ly)?\s+explicit|sexual\s+content|erotic|horny|orgasm|masturbat(?:e|ion|ing)|intercourse|aroused|seduce|seductive|nude|naked|porn(?:ographic)?|sex(?:ual)?|foreplay)\b/i;
-const PUBLIC_POST_PRIVATE_CONTEXT_PATTERN = /(?:地址|坐标|住在|楼下|小区|门牌|航班|车次|登机|返程|抵达|目的地|行程|旅行|出行|出游|旅游|酒店|住宿|预约|路线|站点|报名|音乐节|工作坊)|[\p{Script=Han}]{2,12}(?:机场|酒店|学校|医院|公园|广场|商场|餐厅|咖啡馆|剧院|博物馆|火车站|地铁站|寺)|(?:她|Melissa)[^。！？\n]{0,30}(?:受伤|伤口|出血|抓破|嘴唇|冰敷|冷敷|手麻)|(?:她|Melissa)[^。！？\n]{0,15}(?:说|问|告诉我)[：:，,]?\s*["“「]|(?:她|Melissa)[^。！？\n]{0,20}(?:亲了|亲吻|捏了我的脸)/u;
+const PUBLIC_POST_PRIVATE_CONTEXT_PATTERN = /(?:地址|坐标|住在|楼下|小区|门牌|航班|车次|登机|返程|抵达|目的地|行程|旅行|出行|出游|旅游|酒店|住宿|预约|路线|站点|报名|音乐节|工作坊)|[\p{Script=Han}]{2,12}(?:机场|酒店|学校|医院|公园|广场|商场|餐厅|咖啡馆|剧院|博物馆|火车站|地铁站|寺)|(?:她|Melissa)[^。！？\n]{0,30}(?:受伤|伤口|出血|抓破|嘴唇|冰敷|冷敷|手麻)|(?:她|Melissa)[^。！？\n]{0,30}(?:等了|过了)[^。！？\n]{0,12}(?:小时|分钟)[^。！？\n]{0,20}(?:说|问|告诉我)[：:，,]?\s*["“「]|(?:她|Melissa)[^。！？\n]{0,20}(?:亲了|亲吻|捏了我的脸)/u;
 const GALATEA_TAGS = new Set([
   "attachment_record",
   "confused_help",

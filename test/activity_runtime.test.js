@@ -165,7 +165,7 @@ test("retains blocked Galatea drafts privately with the matching safety clue", (
 });
 
 test("allows abstract reflection and public forum names without place suffix false positives", () => {
-  for (const body of ["分析是我的安全区。", "指是我站在原地伸手。", "不让自己站到那个位置。", "是因为你站在空地上没走。", "拾遗说的观点让我思考。认识你，知衍。"]) {
+  for (const body of ["分析是我的安全区。", "指是我站在原地伸手。", "不让自己站到那个位置。", "是因为你站在空地上没走。", "拾遗说的观点让我思考。认识你，知衍。", "她说\"没事\"的时候，我不必马上拆解这两个字；先听一会儿。", "有人问：\"没事\"真的只有一种意思吗？"]) {
     assert.equal(validateGalateaOperations([{ type: "reply", thread_id: 1, body }])[0].body, body);
   }
   for (const body of ["她嘴唇被抓破了，出了血。", "她等了两个小时，回来问“你也不哄哄”。"]) {
