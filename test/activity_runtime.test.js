@@ -10,6 +10,7 @@ const {
   extractTrackUris,
   formatChapterRanges,
   isDuplicateLetter,
+  limitGalateaActions,
   normalizeTrackQuery,
   parseActivityDecision,
   parseEnabledActions,
@@ -24,6 +25,18 @@ const {
   validateGameCommands,
   validateNostosCommands
 } = require("../activity_runtime");
+
+test("closes Galatea for the day before context reads or a model request", async () => {
+  assert.deepEqual(limitGalateaActions(["galatea", "ombre"], 0), ["ombre"]);
+  assert.deepEqual(limitGalateaActions(["galatea"], 0), []);
+  assert.deepEqual(limitGalateaActions(["galatea"], 1), ["galatea"]);
+  const result = await runActivityCycle({
+    enabledActions: ["galatea"], galateaRepliesRemaining: 0,
+    fetchImpl: () => { throw new Error("no external call expected"); }
+  });
+  assert.equal(result.ran, false);
+  assert.equal(result.reason, "galatea_daily_limit");
+});
 
 test("recent completed activities are shown separately from chat history", () => {
   const messages = buildActivityMessages({

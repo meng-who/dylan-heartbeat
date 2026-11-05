@@ -40,6 +40,10 @@ function parseEnabledActions(value) {
   return [...new Set(actions)];
 }
 
+function limitGalateaActions(actions, repliesRemaining) {
+  return parseEnabledActions(actions).filter(action => action !== "galatea" || repliesRemaining > 0);
+}
+
 function normalizeActivityOutput(value) {
   return String(value || "")
     .trim()
@@ -1463,7 +1467,8 @@ async function requestActivityDecision(options, messages) {
 }
 
 async function runActivityCycle(options) {
-  const enabledActions = parseEnabledActions(options.enabledActions);
+  const enabledActions = limitGalateaActions(options.enabledActions, options.galateaRepliesRemaining ?? 2);
+  if (!enabledActions.length) return { ran: false, status: "skipped", reason: "galatea_daily_limit" };
   const xPostLimit = Number.isInteger(options.xPostLimit) && options.xPostLimit >= 1 ? options.xPostLimit : 3;
   const forceGame = String(options.forceGame || "").trim().toLowerCase();
   if (forceGame && !AUTONOMOUS_GAMES.has(forceGame)) {
@@ -1894,6 +1899,7 @@ module.exports = {
   parseActivityDecision,
   parseGamePlan,
   parseEnabledActions,
+  limitGalateaActions,
   requestActivityDecision,
   resolvePlaylistAddAction,
   runGameSession,

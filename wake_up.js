@@ -18,8 +18,10 @@ const { OmbreMcpClient } = require("./ombre_mcp_client");
 const { readDreamMemory, runDreamCycle } = require("./dream_runtime");
 const {
   activityGate,
+  dateKey,
   activityContentFingerprint,
   classifyActivityFailure,
+  limitGalateaActions,
   parseEnabledActions,
   runActivityCycle,
   shouldChargeActivityBudget
@@ -1083,7 +1085,13 @@ async function runActivityCheck() {
   if (readBooleanEnv("AUTONOMY_NIGHT_ONLY", false) && isDayTime(new Date())) {
     return { ran: false, reason: "outside_activity_window" };
   }
-  const enabledActions = parseEnabledActions(process.env.AUTONOMY_ACTIONS);
+  const configuredActions = parseEnabledActions(process.env.AUTONOMY_ACTIONS);
+  const now = new Date();
+  const state = loadActivityState();
+  const today = dateKey(now, TIME_ZONE);
+  const galateaRepliesRemaining = Math.max(0, 2 - (state.galatea_reply_date === today ? state.galatea_replies_today || 0 : 0));
+  const enabledActions = limitGalateaActions(configuredActions, galateaRepliesRemaining);
+  if (!enabledActions.length && configuredActions.includes("galatea")) return { ran: false, reason: "galatea_daily_limit" };
   const activityModel = String(process.env.AUTONOMY_MODEL_NAME || process.env.MODEL_NAME || "").trim();
   const activityBackupModel = String(process.env.AUTONOMY_BACKUP_MODEL_NAME || process.env.BACKUP_MODEL_NAME || "").trim();
   const required = ["TARGET_API_URL", "TARGET_API_KEY"];
@@ -1114,8 +1122,6 @@ async function runActivityCheck() {
   );
   if (!lastUserActivity) return { ran: false, reason: "user_activity_missing" };
 
-  const now = new Date();
-  const state = loadActivityState();
   const maxPerDay = readNumberEnv("AUTONOMY_MAX_ACTIONS_PER_DAY", 3, { min: 1, max: 24 });
   const gate = activityGate({
     now,
@@ -1251,7 +1257,7 @@ async function runActivityCheck() {
       galateaUrl: process.env.GALATEA_MCP_URL,
       galateaToken: process.env.GALATEA_MCP_TOKEN,
       galateaTimeoutMs: readPositiveTimeout("GALATEA_MCP_TIMEOUT_MS", 20_000),
-      galateaRepliesRemaining: Math.max(0, 2 - (nextState.galatea_replies_today || 0)),
+      galateaRepliesRemaining,
       onGalateaReplyPublished: () => {
         nextState.galatea_replies_today += 1;
         saveActivityState(nextState);
