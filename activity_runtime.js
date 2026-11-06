@@ -120,6 +120,7 @@ function parseActivityDecision(value, { deferGalateaSafety = false } = {}) {
     parsed = {
       action: readField("action", ["动作", "选择"]),
       query: readField("query", ["搜索", "搜索词"]),
+      backup_query: readField("backup_query", ["备用搜索", "备选歌曲"]),
       content: readActivityTag(text, "content") || readActivityLine(text, ["content", "内容"]),
       title: readField("title", ["标题"]),
       aspect: readField("aspect", ["维度"]),
@@ -170,6 +171,9 @@ function parseActivityDecision(value, { deferGalateaSafety = false } = {}) {
     aspect: aspect.slice(0, 40),
     reason: String(parsed.reason || "").trim().slice(0, 500)
   };
+  if (action === "spotify_add" && (parsed.backup_query || parsed.backupQuery)) {
+    decision.backupQuery = String(parsed.backup_query || parsed.backupQuery).trim().slice(0, 300);
+  }
   if (action === "forum_lurk") {
     decision.roomId = String(parsed.room_id || parsed.roomId || "").trim().slice(0, 160);
     const replyId = Number(parsed.reply_to_message_id || parsed.replyToMessageId || 0);
@@ -347,6 +351,48 @@ function extractTrackUris(result) {
   return [...new Set(haystack.match(/spotify:track:[A-Za-z0-9]+/g) || [])];
 }
 
+function spotifySearchCandidates(result) {
+  const candidates = [];
+  const seen = new Set();
+  const add = (uri, name, artists) => {
+    if (!/^spotify:track:[A-Za-z0-9]+$/.test(String(uri || "")) || seen.has(uri)) return;
+    seen.add(uri);
+    candidates.push({ uri, name: String(name || ""), artists: String(artists || "") });
+  };
+  const visit = value => {
+    if (Array.isArray(value)) return value.forEach(visit);
+    if (!value || typeof value !== "object") return;
+    if (value.uri && value.name) {
+      const artists = Array.isArray(value.artists)
+        ? value.artists.map(artist => typeof artist === "string" ? artist : artist?.name).filter(Boolean).join(" ")
+        : typeof value.artist === "object" ? value.artist?.name : value.artist || "";
+      add(value.uri, value.name, artists);
+    }
+    Object.values(value).forEach(visit);
+  };
+  visit(result?.structuredContent);
+  for (const item of result?.content || []) {
+    if (item?.type !== "text") continue;
+    const value = String(item.text || "");
+    try { visit(JSON.parse(value)); } catch {}
+    for (const line of value.split(/\r?\n/)) {
+      const match = line.match(/(.+?)\s+(?:by|—|–|-)\s+(.+?)\s*[—–-]\s*(spotify:track:[A-Za-z0-9]+)/i);
+      if (match) add(match[3], match[1].trim(), match[2].trim());
+    }
+  }
+  return candidates;
+}
+
+function spotifyCandidateMatches(query, candidate) {
+  const normalize = value => String(value || "").normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  const wanted = ` ${normalize(query)} `;
+  const title = normalize(candidate.name);
+  const artists = normalize(candidate.artists);
+  if (!title || !wanted.includes(` ${title} `)) return false;
+  if (!artists) return wanted.trim() === title;
+  return wanted.includes(` ${artists} `);
+}
+
 function resolvePlaylistAddAction(tool) {
   const values = tool?.inputSchema?.properties?.action?.enum || [];
   return ["add", "add_items", "add_tracks", "add_to_playlist"].find(value => values.includes(value)) || "add";
@@ -431,7 +477,7 @@ function buildActivityMessages({
 }) {
   const actions = parseEnabledActions(enabledActions);
   const choices = questionBoxPending ? [] : ["<action>none</action>\n<reason>简短原因</reason>"];
-  if (actions.includes("spotify")) choices.push("<action>spotify_add</action>\n<query>歌曲名 歌手名</query>\n<reason>为什么选它</reason>");
+  if (actions.includes("spotify")) choices.push("<action>spotify_add</action>\n<query>首选歌曲名 歌手名</query>\n<backup_query>可选：若首选找不到，另一首你也真正想加的歌名 歌手名</backup_query>\n<reason>为什么选它们</reason>");
   if (actions.includes("ombre")) {
     choices.push("<action>ombre_i_write</action>\n<aspect>可选维度</aspect>\n<reason>为什么值得记下</reason>\n<content>第一人称自我认识</content>");
     choices.push("<action>ombre_letter_write</action>\n<title>信件标题</title>\n<reason>为什么现在写</reason>\n<content>完整信件正文</content>");
@@ -1727,14 +1773,16 @@ async function runActivityCycle(options) {
     const searchTool = tools.find(tool => tool.name === "spotify_search");
     const playlistTool = tools.find(tool => tool.name === "spotify_playlist");
     if (!searchTool || !playlistTool) throw new Error("Spotify MCP 缺少 spotify_search 或 spotify_playlist 工具");
-    const searchResult = await client.callTool("spotify_search", { query: decision.query, type: "track", limit: 5 });
-    const trackUri = extractTrackUri(searchResult);
-    if (!trackUri) throw new Error("Spotify 搜索结果中没有可用的 track URI");
-    const normalizedQuery = normalizeTrackQuery(decision.query);
-    const duplicateQuery = (options.recentTrackQueries || []).some(query => normalizeTrackQuery(query) === normalizedQuery);
-    if ((options.recentTrackUris || []).includes(trackUri) || duplicateQuery) {
-      return { ran: true, status: "skipped", decision, trackUri, reason: "recent_duplicate", source: "spotify" };
+    let selected;
+    for (const query of [decision.query, decision.backupQuery].filter(Boolean)) {
+      if ((options.recentTrackQueries || []).some(previous => normalizeTrackQuery(previous) === normalizeTrackQuery(query))) continue;
+      const searchResult = await client.callTool("spotify_search", { query, type: "track", limit: 5 });
+      selected = spotifySearchCandidates(searchResult).find(candidate =>
+        spotifyCandidateMatches(query, candidate) && !(options.recentTrackUris || []).includes(candidate.uri));
+      if (selected) { selected.query = query; break; }
     }
+    if (!selected) return { ran: true, status: "skipped", decision, reason: "track_not_found", source: "spotify" };
+    const trackUri = selected.uri;
     const playlistActions = playlistTool?.inputSchema?.properties?.action?.enum || [];
     if (playlistActions.includes("items")) {
       const itemsResult = await client.callTool("spotify_playlist", {
@@ -1746,18 +1794,24 @@ async function runActivityCycle(options) {
         return { ran: true, status: "skipped", decision, trackUri, reason: "playlist_duplicate", source: "spotify" };
       }
     }
-    await client.callTool("spotify_playlist", {
+    const addResult = await client.callTool("spotify_playlist", {
       action: resolvePlaylistAddAction(playlistTool),
       playlist_id: options.playlistId,
       uris: [trackUri]
     });
+    const addData = JSON.stringify(addResult?.structuredContent || {}) + " " + extractToolText(addResult);
+    if (/\b(?:error|failed|failure)\b/i.test(addData) || /"success"\s*:\s*false/i.test(addData)) {
+      throw new Error("Spotify 歌单添加工具未确认成功");
+    }
     return {
       ran: true,
       status: "success",
       decision,
       trackUri,
+      trackName: selected.name,
+      selectedQuery: selected.query,
       source: "spotify",
-      timelineSummary: `向 Spotify 歌单「${options.playlistName || "自主收藏"}」添加了搜索结果「${decision.query}」${decision.reason ? `；选择原因：${decision.reason}` : ""}`
+      timelineSummary: `向 Spotify 歌单「${options.playlistName || "自主收藏"}」添加了「${selected.name}」${selected.artists ? `（${selected.artists}）` : ""}${decision.reason ? `；选择原因：${decision.reason}` : ""}`
     };
   }
 

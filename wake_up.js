@@ -1276,7 +1276,7 @@ async function runActivityCheck() {
     });
     if (result.trackUri && result.status === "success") {
       nextState.recent_track_uris.push(result.trackUri);
-      if (result.decision?.query) nextState.recent_track_queries.push(result.decision.query);
+      if (result.selectedQuery || result.decision?.query) nextState.recent_track_queries.push(result.selectedQuery || result.decision.query);
       saveActivityState(nextState);
     }
     if (result.xReplyId && result.status === "success") {
@@ -1366,7 +1366,8 @@ async function runActivityCheck() {
     action: result.decision?.action || "activity_cycle",
     summary: result.decision?.reason || "",
     safety_hold: Boolean(result.decision?.safetyHold),
-    query: result.decision?.query || "",
+    query: result.selectedQuery || result.decision?.query || "",
+    track_name: result.trackName || "",
     candidate: result.decision?.content || "",
     title: result.decision?.title || "",
     aspect: result.decision?.aspect || "",

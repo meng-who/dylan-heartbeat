@@ -1532,7 +1532,9 @@ function archivePageHtml() {
             : "本次构想（未执行）：";
         const activityText = [
           item.summary && summaryLabel + item.summary,
-          item.query && (wasExecuted ? "搜索：" : "拟搜索：") + item.query
+          item.query && (wasExecuted ? "搜索：" : "拟搜索：") + item.query,
+          wasExecuted && item.track_name && "实际添加：" + item.track_name,
+          item.reason === "track_not_found" && "没有找到可确认的歌曲，本轮未添加。"
         ].filter(Boolean).join("\\n");
         if (activityText) appendArchiveText(article, "candidate", activityText, "查看完整构想");
       }

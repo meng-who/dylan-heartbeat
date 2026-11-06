@@ -653,6 +653,40 @@ test("searches and adds one track without exposing playback tools", async () => 
   });
 });
 
+test("uses a model-chosen backup without another model call when the first result is unrelated", async () => {
+  const calls = [];
+  const reply = value => Response.json(value);
+  const fetchImpl = async (url, init) => {
+    const body = JSON.parse(init.body);
+    calls.push({ url, body });
+    if (url === "https://model.test/v1/chat/completions") return reply({ choices: [{ message: { content:
+      '<activity><action>spotify_add</action><query>First Song First Artist</query><backup_query>Second Song Second Artist</backup_query><reason>both fit</reason></activity>'
+    } }] });
+    if (body.method === "initialize") return reply({ jsonrpc: "2.0", id: body.id, result: {} });
+    if (body.method === "notifications/initialized") return new Response(null, { status: 202 });
+    if (body.method === "tools/list") return reply({ jsonrpc: "2.0", id: body.id, result: { tools: [
+      { name: "spotify_search" },
+      { name: "spotify_playlist", inputSchema: { properties: { action: { enum: ["items", "add"] } } } }
+    ] } });
+    if (body.params.name === "spotify_search") {
+      const first = body.params.arguments.query.startsWith("First");
+      return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: JSON.stringify({ items: [
+        { uri: first ? "spotify:track:WRONG" : "spotify:track:RIGHT", name: first ? "Unrelated" : "Second Song", artists: [{ name: first ? "Other" : "Second Artist" }] }
+      ] }) }] } });
+    }
+    if (body.params.arguments.action === "items") return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: '{"items":[]}' }] } });
+    return reply({ jsonrpc: "2.0", id: body.id, result: { content: [{ type: "text", text: "added" }] } });
+  };
+  const result = await runActivityCycle({
+    apiUrl: "https://model.test/v1/chat/completions", model: "model", enabledActions: "spotify",
+    spotifyUrl: "https://spotify.test/mcp", playlistId: "list", fetchImpl
+  });
+  assert.equal(result.status, "success");
+  assert.equal(result.trackUri, "spotify:track:RIGHT");
+  assert.equal(calls.filter(call => call.url === "https://model.test/v1/chat/completions").length, 1);
+  assert.deepEqual(calls.filter(call => call.body.params?.name === "spotify_search").map(call => call.body.params.arguments.query), ["First Song First Artist", "Second Song Second Artist"]);
+});
+
 test("reads Ombre context and writes only a candidate self-cognition with one model call", async () => {
   const calls = [];
   const reply = value => new Response(JSON.stringify(value), { headers: { "content-type": "application/json" } });
