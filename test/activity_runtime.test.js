@@ -38,6 +38,15 @@ test("closes Galatea for the day before context reads or a model request", async
   assert.equal(result.reason, "galatea_daily_limit");
 });
 
+test("Ombre daily limits remove only the exhausted writing choice", () => {
+  const letterOnly = buildActivityMessages({ enabledActions: ["ombre"], ombreICanWrite: false }).map(message => message.content).join("\n");
+  assert.doesNotMatch(letterOnly, /<action>ombre_i_write<\/action>/);
+  assert.match(letterOnly, /<action>ombre_letter_write<\/action>/);
+  const iOnly = buildActivityMessages({ enabledActions: ["ombre"], ombreLetterCanWrite: false }).map(message => message.content).join("\n");
+  assert.match(iOnly, /<action>ombre_i_write<\/action>/);
+  assert.doesNotMatch(iOnly, /<action>ombre_letter_write<\/action>/);
+});
+
 test("recent completed activities are shown separately from chat history", () => {
   const messages = buildActivityMessages({
     enabledActions: ["ombre", "x"],

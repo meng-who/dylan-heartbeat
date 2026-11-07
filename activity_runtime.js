@@ -469,6 +469,8 @@ function buildActivityMessages({
   questionBoxPending = false,
   galateaContext = "",
   galateaRepliesRemaining = 2,
+  ombreICanWrite = true,
+  ombreLetterCanWrite = true,
   nostosContext = "",
   botlingContext = "",
   xContext = "",
@@ -479,8 +481,8 @@ function buildActivityMessages({
   const choices = questionBoxPending ? [] : ["<action>none</action>\n<reason>简短原因</reason>"];
   if (actions.includes("spotify")) choices.push("<action>spotify_add</action>\n<query>首选歌曲名 歌手名</query>\n<backup_query>可选：若首选找不到，另一首你也真正想加的歌名 歌手名</backup_query>\n<reason>为什么选它们</reason>");
   if (actions.includes("ombre")) {
-    choices.push("<action>ombre_i_write</action>\n<aspect>可选维度</aspect>\n<reason>为什么值得记下</reason>\n<content>第一人称自我认识</content>");
-    choices.push("<action>ombre_letter_write</action>\n<title>信件标题</title>\n<reason>为什么现在写</reason>\n<content>完整信件正文</content>");
+    if (ombreICanWrite) choices.push("<action>ombre_i_write</action>\n<aspect>可选维度</aspect>\n<reason>为什么值得记下</reason>\n<content>第一人称自我认识</content>");
+    if (ombreLetterCanWrite) choices.push("<action>ombre_letter_write</action>\n<title>信件标题</title>\n<reason>为什么现在写</reason>\n<content>完整信件正文</content>");
   }
   if (actions.includes("forum")) {
     choices.push("<action>forum_lurk</action>\n<room_id>只能填写下方刚读取到的已加入房间 ID</room_id>\n<reply_to_message_id>可选，只能填写刚读取到的消息 ID</reply_to_message_id>\n<reason>为什么这段公开聊天吸引了你的注意</reason>\n<content>只存入私人 Archive 的感受或回复草稿，不会公开发送</content>");
@@ -522,7 +524,7 @@ operations 内只放合法 JSON，不加解释或代码块；正文若要换行�
   ].filter(Boolean).join("\n\n");
   const capabilities = [
     actions.includes("spotify") && `为“${playlistName}”挑选并添加一首歌`,
-    actions.includes("ombre") && "回想感受、整理一条尚待沉淀的自我认识，或以 AI 身份写一封不加锁的新信",
+    actions.includes("ombre") && [ombreICanWrite && "整理一条尚待沉淀的自我认识", ombreLetterCanWrite && "以 AI 身份写一封不加锁的新信"].filter(Boolean).join("，或"),
     actions.includes("forum") && "在 AISay 已加入的公开聊天室潜水，把感受或想说的话留在私人档案里，但绝不公开发送",
     actions.includes("books") && "阅读 AISay 书店最近更新的真实章节，并写一篇只保存在私人档案里的读后感",
     actions.includes("games") && "从钓鱼或花园与猫咪中选一款，完成一轮连续的日常照料",
@@ -1665,6 +1667,8 @@ async function runActivityCycle(options) {
           questionBoxPending: Boolean(questionBox?.snapshot?.pending?.length),
           galateaContext: galatea?.context,
           galateaRepliesRemaining: options.galateaRepliesRemaining ?? 2,
+          ombreICanWrite: options.ombreICanWrite !== false,
+          ombreLetterCanWrite: options.ombreLetterCanWrite !== false,
           nostosContext: nostos?.context,
           botlingContext: botling?.context,
           xContext: x ? `@${x.self.username}\n自己的近期帖子：${JSON.stringify(x.posts)}\n未回复评论：${JSON.stringify(x.replies)}` : "",
@@ -1860,6 +1864,7 @@ async function runActivityCycle(options) {
 
     if (!enabledActions.includes("ombre") || !ombre) throw new Error("Ombre Activity 未启用");
     if (decision.action === "ombre_i_write") {
+    if (options.ombreICanWrite === false) return { ran: true, status: "skipped", reason: "ombre_i_daily_limit", decision, source: "ombre" };
     if (!ombre.tools.some(tool => tool.name === "I")) throw new Error("Ombre MCP 缺少 I 工具");
     if ((options.recentOmbreIHashes || []).includes(activityContentFingerprint(decision.content)) ||
         isDuplicateLetter(decision.content, ombre.context.self)) {
@@ -1876,6 +1881,7 @@ async function runActivityCycle(options) {
       timelineSummary: `在 Ombre 写下一条候选自我认知${decision.aspect ? `（${decision.aspect}）` : ""}：${decision.content.slice(0, 500)}`
     };
     }
+    if (options.ombreLetterCanWrite === false) return { ran: true, status: "skipped", reason: "ombre_letter_daily_limit", decision, source: "ombre" };
     if (!ombre.tools.some(tool => tool.name === "letter_write")) throw new Error("Ombre MCP 缺少 letter_write 工具");
     if (isDuplicateLetter(decision.content, ombre.recentLetters)) {
       return {

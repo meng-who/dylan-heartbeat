@@ -1091,8 +1091,12 @@ async function runActivityCheck() {
   const state = loadActivityState();
   const today = dateKey(now, TIME_ZONE);
   const galateaRepliesRemaining = Math.max(0, 2 - (state.galatea_reply_date === today ? state.galatea_replies_today || 0 : 0));
-  const enabledActions = limitGalateaActions(configuredActions, galateaRepliesRemaining);
+  const ombreICanWrite = state.ombre_date !== today || !(state.ombre_i_today >= 1);
+  const ombreLetterCanWrite = state.ombre_date !== today || !(state.ombre_letters_today >= 1);
+  const enabledActions = limitGalateaActions(configuredActions, galateaRepliesRemaining)
+    .filter(action => action !== "ombre" || ombreICanWrite || ombreLetterCanWrite);
   if (!enabledActions.length && configuredActions.includes("galatea")) return { ran: false, reason: "galatea_daily_limit" };
+  if (!enabledActions.length && configuredActions.includes("ombre")) return { ran: false, reason: "ombre_daily_limit" };
   const activityModel = String(process.env.AUTONOMY_MODEL_NAME || process.env.MODEL_NAME || "").trim();
   const activityBackupModel = String(process.env.AUTONOMY_BACKUP_MODEL_NAME || process.env.BACKUP_MODEL_NAME || "").trim();
   const required = ["TARGET_API_URL", "TARGET_API_KEY"];
@@ -1147,6 +1151,11 @@ async function runActivityCheck() {
   if (nextState.galatea_reply_date !== gate.date) {
     nextState.galatea_reply_date = gate.date;
     nextState.galatea_replies_today = 0;
+  }
+  if (nextState.ombre_date !== gate.date) {
+    nextState.ombre_date = gate.date;
+    nextState.ombre_i_today = 0;
+    nextState.ombre_letters_today = 0;
   }
   saveActivityState(nextState);
   console.log(JSON.stringify({
@@ -1234,6 +1243,8 @@ async function runActivityCheck() {
       xSeenReplies: Array.isArray(nextState.x_seen_replies) ? nextState.x_seen_replies : [],
       recentXPostHashes: Array.isArray(nextState.recent_x_post_hashes) ? nextState.recent_x_post_hashes : [],
       recentOmbreIHashes: Array.isArray(nextState.recent_ombre_i_hashes) ? nextState.recent_ombre_i_hashes : [],
+      ombreICanWrite,
+      ombreLetterCanWrite,
       xPostsToday: nextState.x_date === gate.date ? nextState.x_posts_today || 0 : 0,
       xPostLimit: Math.floor(readNumberEnv("X_MAX_POSTS_PER_DAY", 3, { min: 1, max: 24 })),
       xRepliesToday: nextState.x_date === gate.date ? nextState.x_replies_today || 0 : 0,
@@ -1298,7 +1309,12 @@ async function runActivityCheck() {
       saveActivityState(nextState);
     }
     if (result.status === "success" && result.decision?.action === "ombre_i_write") {
+      nextState.ombre_i_today += 1;
       nextState.recent_ombre_i_hashes = [...(nextState.recent_ombre_i_hashes || []), activityContentFingerprint(result.decision.content)].slice(-100);
+      saveActivityState(nextState);
+    }
+    if (result.status === "success" && result.decision?.action === "ombre_letter_write") {
+      nextState.ombre_letters_today += 1;
       saveActivityState(nextState);
     }
   } catch (error) {
